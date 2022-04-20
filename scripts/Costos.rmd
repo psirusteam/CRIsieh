@@ -44,14 +44,16 @@ modelo_rural <- lm(costoXUpmRur ~ cantVivUpm + muestraUpmRur, data = datos_rural
 Para el área urbana sólo es signitificativa estadísticamente la cantidad de viviendas por UPM, el número de UPMs no resulta estadísticamente significativo.
 
 ```{r, warning=FALSE, message=FALSE, echo=FALSE}
-modelo_urbano %>% tbl_regression(intercept = T)
+modelo_urbano %>% tbl_regression(intercept = T, 
+                                 label = list(cantVivUpm ~ "Cantidad de viviendas por UPM", muestraUpmUrb ~ "Num de UPMs en la muestra"))
 ```
 El modelo saturado para el área urbano tiene un coeficiente de determinación de  `r round(100 * summary(modelo_urbano)$r.squared, 1)` %
 
 De manera similar en el área rural:
 
 ```{r, warning=FALSE, message=FALSE, echo=FALSE}
-modelo_rural %>% tbl_regression(intercept = T)
+modelo_rural %>% tbl_regression(intercept = T, 
+                                 label = list(cantVivUpm ~ "Cantidad de viviendas por UPM", muestraUpmRur ~ "Num de UPMs en la muestra"))
 ```
 
 El $R^2$ del modelo de costos saturado para el área rural es de `r round(100 *summary(modelo_rural)$r.squared, 1)` %
@@ -68,7 +70,8 @@ Ajustamos modelo reducido unicamente con el número de viviendas por UPM.
 
 ```{r, warning=FALSE, message=FALSE, echo=FALSE}
 modelo_urbanoRed <- lm(formula = costoXUpmUrb ~ cantVivUpm, data = datos_urbano)
-modelo_urbanoRed %>% tbl_regression(intercept = T)
+modelo_urbanoRed %>% tbl_regression(intercept = T, 
+                                 label = list(cantVivUpm   ~ "Cantidad de viviendas por UPM"))
 ```
 El modelo para el área urbana tiene un coeficiente de determinación de  `r round(100 * summary(modelo_urbanoRed)$r.squared, 1)` %
 
@@ -82,7 +85,8 @@ abline(modelo_urbanoRed)
 Similarmente ajustamos el modelo reducido para el área rural:
 ```{r, warning=FALSE, message=FALSE, echo=FALSE}
 modelo_ruralRed <- lm(formula = costoXUpmRur ~ cantVivUpm, data = datos_rural)
-modelo_urbanoRed %>% tbl_regression(intercept = T)
+modelo_urbanoRed %>% tbl_regression(intercept = T,
+          label = list(cantVivUpm   ~ "Cantidad de viviendas por UPM"))
 ```
 
 El modelo para el área rural tiene un coeficiente de determinación de  `r round(100 * summary(modelo_ruralRed)$r.squared, 1)` %
