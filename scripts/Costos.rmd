@@ -17,8 +17,9 @@ Incialmente leemos La tabla de costos consta de las tablas de muestreo junto con
 library(dplyr)
 library(readxl)
 library(gtsummary)
-datos_urbano <- read_excel("Datos_Costos.xlsx", range = "A1:C12")
-datos_rural <- read_excel("Datos_Costos.xlsx", range = "E1:G12")
+getwd()
+datos_urbano <- read_excel("../Input/Datos_Costos.xlsx", range = "A1:C12")
+datos_rural <- read_excel("../Input/Datos_Costos.xlsx", range = "E1:G12")
 ```
 
 
