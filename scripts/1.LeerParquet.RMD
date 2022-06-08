@@ -1,0 +1,38 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(haven)
+setwd("../data/")
+df_spss <- haven::read_spss("CR_CENSO2011_NISE_V3_1.sav")
+dim(df_spss)
+```
+```{r}
+library(tidyverse)
+library(labelled)
+etiquetas_var <- labelled::var_label(df_spss)
+etiquetas_val <- labelled::val_labels(df_spss)
+
+save(etiquetas_var, etiquetas_val,
+     file = "../data/etiquetas.Rdata")
+```
+
+```{r}
+library(arrow)
+library(dplyr)
+setwd("../data/")
+df_parquet <- open_dataset("parquet")
+
+names(df_parquet)
+dim(df_parquet)
+df_parquet %>% select(V04_MATERIAL_PAREDES)  %>% collect()%>% table()
+
+```
+
+
