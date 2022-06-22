@@ -9,6 +9,20 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+Pendiente: hacer pobreza extrema: 9%
+Pobreza: 5%
+
+
+Sumar personas / suma UPMs para la segunda columna
+
+Escoger un nuevo escenario: el n por UPM
+
+Con ese único tamaño de muestra, nacional, urbnao, rural,
+
+Resumen: errores
+
+
+
 
 ```{r, warning=FALSE, message=FALSE}
 library(haven)
@@ -771,6 +785,7 @@ names(lista_resultados_IPM) <- c("IPM_urbano", "IPM_rural", "IPM_nacional")
 
 
 
+# Pobreza Extrema
 
 
 
