@@ -9,6 +9,28 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+El proceso para la estimación del tamaño de muestra se divide en los siguientes procesos:
+
+1. Carga e instalación de librerías
+
+2. Lectura de datos y preprocesamiento
+
+3. Deficinión diseño muestral y estimación de parámetros
+
+4. Parámetros para tablas de muestreo
+4.1. Población económicamente activa
+4.2. Correlación intraclásica
+
+5. Tablas de muestreo
+  5.1. Configuración de estimaciones puntuales y medidas de precisión
+  5.2. Estimación de otras medidas de precisión para los valores fijados para las diferentes          variables trazadoras
+  5.3. Generación de las tablas de muestreo
+  5.4. Integración de tablas nacionales
+
+6. Integración de costos a las tablas de muestreo
+
+7. Exportación de los resultados
+
 # 1. Carga e instalación de librerías
 
 ```{r, warning=FALSE, message=FALSE}
@@ -291,7 +313,7 @@ TablaEditada_Desoc_ft %>% print()
 
 El objetivo de los procesos desarrollados en el script es generar diferentes tamaños de muestra para el área urbana, rural y nacional para los siguientes indicadores:
 
-* Razón de desocupación
+* Razón (tasa) de desocupación
 * Pobreza monetaria no extrema
 * Pobreza monetaria extrema
 * Pobreza multidimensional (IPM)
