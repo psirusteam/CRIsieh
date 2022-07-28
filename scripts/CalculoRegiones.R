@@ -7,9 +7,9 @@ me_calculo <- function (N, n, r, b, rho, P, conf, m)
     bar.n <- m * r * b
     Deff <- 1 + (bar.n - 1) * rho
     me <- e4p(N, n, P, DEFF = Deff, conf = 0.95)
-    Mi <- n / (r * b)
-    M <- n / bar.n
-  
+    # Mi <- n / (r * b)
+    # M <- n / bar.n
+    # 
   # result <- data.frame(HouseholdsPerPSU = round(m), PersonsPerPSU = round(bar.n), 
   #                      DEFF = round(Deff, 2), PSUinSample = round(M), HouseholdsInSample = round(Mi), 
   #                      PersonsInSample = round(n))
