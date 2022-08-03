@@ -912,187 +912,11 @@ conf = 0.95, m = 5:15)
 
 
 
-## 5.4. Integración de tablas nacionales
-
-Integrarlas las  tablas de muestreo (Urbana y rural) en una nacional, para lograr lo anterior desarrollamos una función que podamos aplicar.
-
-```{r}
-# tabla_muestreo_urbano <- tablaMuestreo_pobreza_Urbana
-# tabla_muestreo_rural <- tablaMuestreo_pobreza_Rural
-#  str_indicador = "pobreza_prop" 
-#  str_cve = "pobreza_cve"
-#  str_N = "N"
-
-# tabla_muestreo_urbano = tablaMuestreo_tasa_desocupacion_Urbana;
-#                        tabla_muestreo_rural = tablaMuestreo_tasa_desocupacion_Rural;
-#                        str_indicador = "tasa_desocupacion_prop";
-#                        str_cve = "tasa_desocupacion_cve";
-#                        str_N = "N_activos";
-
-f_CompletarTablaNacional <- function(tabla_muestreo_urbano, tabla_muestreo_rural, str_indicador, str_cve, str_N){
-tablaMuestreo_nacional <- tabla_muestreo_urbano
-
-
-tablaMuestreo_nacional$PSUinSample <- tabla_muestreo_urbano$PSUinSample + 
-                                              tabla_muestreo_rural$PSUinSample
-
-tablaMuestreo_nacional$HouseholdsInSample  <- tabla_muestreo_urbano$HouseholdsInSample + 
-                                              tabla_muestreo_rural$HouseholdsInSample
-
-tablaMuestreo_nacional$PersonsInSample  <- tabla_muestreo_urbano$PersonsInSample + 
-                                              tabla_muestreo_rural$PersonsInSample
-
-tablaMuestreo_nacional$PersonsPerPSU <- tablaMuestreo_nacional$PersonsInSample /  
-                                        tablaMuestreo_nacional$PSUinSample  
-
-# deff = V_p() / VMas  luego vMAS_d = v_p()_d / deff_d (tabla muestreo urb/rural) 
-# como obtengo v_p() = (cve  * p) ^2
-
-V_MAS_Urbana <- ((df_ValoresFijados[[str_cve]][1] * df_ValoresFijados[[str_indicador]][1])^2) / 
-                         tabla_muestreo_urbano$DEFF
-
-V_MAS_Rural <- ((df_ValoresFijados[[str_cve]][2] * df_ValoresFijados[[str_indicador]][2])^2) / 
-                         tabla_muestreo_rural$DEFF
-
-#V = (cve * P_gorro), con Pgorro, cve (el que deseamos no el de la encuesta que es menos exigente)
-V_nacional <- ((df_ValoresFijados[[str_cve]][1] * df_ValoresFijados[[str_indicador]][1])^2) + ((df_ValoresFijados[[str_cve]][2] * df_ValoresFijados[[str_indicador]][2])^2) 
-
-indicador_nacional = (df_estima_indicadores[[str_N]][1] * df_ValoresFijados[[str_indicador]][1] +
-               df_estima_indicadores[[str_N]][2] * df_ValoresFijados[[str_indicador]][2]) / 
-               (df_estima_indicadores[[str_N]][1] + df_estima_indicadores[[str_N]][2])
-deff_nacional <- V_nacional / (V_MAS_Urbana + V_MAS_Rural) # Objetivo
-
-medidas_error_nacional <- samplesize4surveys::e4p(N = df_ParamGenerales$N[1] + df_ParamGenerales$N[2], n = tablaMuestreo_nacional$PersonsInSample, 
-                        P = indicador_nacional, DEFF = deff_nacional)
-
-
-tablaMuestreo_nacional$DEFF <- deff_nacional
-
-tablaMuestreo_nacional$cve <- round(medidas_error_nacional$cve / 100, 3)
-tablaMuestreo_nacional$M.E. <- round(medidas_error_nacional$Margin_of_error / 100, 3)
-tablaMuestreo_nacional$M.E.R <- round(medidas_error_nacional$Relative_Margin_of_error / 100, 3)
-
-#  str_indicador = "pobreza_prop" 
-str_prefijo_var <- gsub("_prop", "", str_indicador)
-tabla_muestreo_urbano$cve <- round(df_ValoresFijados[[paste0(str_prefijo_var, "_cve")]][1], 3)
-tabla_muestreo_urbano$M.E. <- round(df_ValoresFijados[[paste0(str_prefijo_var, "_me")]][1], 3)
-tabla_muestreo_urbano$M.E.R <- round(df_ValoresFijados[[paste0(str_prefijo_var, "_mer")]][1], 3)
-
-tabla_muestreo_rural$cve <-  round(df_ValoresFijados[[paste0(str_prefijo_var, "_cve")]][2], 3)
-tabla_muestreo_rural$M.E. <- round(df_ValoresFijados[[paste0(str_prefijo_var, "_me")]][2], 3)
-tabla_muestreo_rural$M.E.R <- round(df_ValoresFijados[[paste0(str_prefijo_var, "_mer")]][2], 3)
-resultado <- list(tablaMuestreo_nacional, tabla_muestreo_urbano, tabla_muestreo_rural)
-names(resultado) <- c("tabla_Muestreo_nacional", "tabla_Muestreo_urbano", "tabla_Muestreo_rural")
-resultado
-}
-```
-
-Completamos las tablas de muestreo nacional:
-
-```{r}
-tablaMuestreo_pobreza <- f_CompletarTablaNacional(tabla_muestreo_urbano = tablaMuestreo_pobreza_Urbana,
-                       tabla_muestreo_rural = tablaMuestreo_pobreza_Rural,
-                       str_indicador = "pobreza_prop",
-                       str_cve = "pobreza_cve", 
-                       str_N = "N")
-
-tablaMuestreo_pobreza_Nacional <- tablaMuestreo_pobreza$tabla_Muestreo_nacional
-tablaMuestreo_pobreza_Urbana <- tablaMuestreo_pobreza$tabla_Muestreo_urbano
-tablaMuestreo_pobreza_Rural <- tablaMuestreo_pobreza$tabla_Muestreo_rural
-
-tablaMuestreo_pobrezaExtr <- f_CompletarTablaNacional(tabla_muestreo_urbano = tablaMuestreo_pobrezaExtr_Urbana,
-                       tabla_muestreo_rural = tablaMuestreo_pobrezaExtr_Rural,
-                       str_indicador = "pobrezaExtr_prop",
-                       str_cve = "pobrezaExtr_cve", 
-                       str_N = "N")
-
-tablaMuestreo_pobrezaExtr_Nacional <- tablaMuestreo_pobrezaExtr$tabla_Muestreo_nacional
-tablaMuestreo_pobrezaExtr_Urbana <- tablaMuestreo_pobrezaExtr$tabla_Muestreo_urbano
-tablaMuestreo_pobrezaExtr_Rural <- tablaMuestreo_pobrezaExtr$tabla_Muestreo_rural
-
-
-
-
-tablaMuestreo_NBI <- f_CompletarTablaNacional(tabla_muestreo_urbano = tablaMuestreo_NBI_Urbana,
-                       tabla_muestreo_rural = tablaMuestreo_NBI_Rural,
-                       str_indicador = "NBI_prop",
-                       str_cve = "NBI_cve", 
-                       str_N = "N")
-
-tablaMuestreo_NBI_Nacional <- tablaMuestreo_NBI$tabla_Muestreo_nacional
-tablaMuestreo_NBI_Urbana <- tablaMuestreo_NBI$tabla_Muestreo_urbano
-tablaMuestreo_NBI_Rural <- tablaMuestreo_NBI$tabla_Muestreo_rural
-
-
-tablaMuestreo_tasa_desocupacion <- f_CompletarTablaNacional(tabla_muestreo_urbano = tablaMuestreo_tasa_desocupacion_Urbana,
-                       tabla_muestreo_rural = tablaMuestreo_tasa_desocupacion_Rural,
-                       str_indicador = "tasa_desocupacion_prop",
-                       str_cve = "tasa_desocupacion_cve", 
-                       str_N = "N_activos")
-
-
-tablaMuestreo_tasa_desocupacion_Nacional <- tablaMuestreo_tasa_desocupacion$tabla_Muestreo_nacional
-tablaMuestreo_tasa_desocupacion_Urbana <- tablaMuestreo_tasa_desocupacion$tabla_Muestreo_urbano
-tablaMuestreo_tasa_desocupacion_Rural <- tablaMuestreo_tasa_desocupacion$tabla_Muestreo_rural
-
-
-tablaMuestreo_tasa_ocupacion <- f_CompletarTablaNacional(tabla_muestreo_urbano = tablaMuestreo_tasa_ocupacion_Urbana,
-                       tabla_muestreo_rural = tablaMuestreo_tasa_ocupacion_Rural,
-                       str_indicador = "tasa_ocupacion_prop",
-                       str_cve = "tasa_ocupacion_cve", 
-                       str_N = "N_activos")
-
-tablaMuestreo_tasa_ocupacion_Nacional <- tablaMuestreo_tasa_ocupacion$tabla_Muestreo_nacional
-tablaMuestreo_tasa_ocupacion_Urbana <- tablaMuestreo_tasa_ocupacion$tabla_Muestreo_urbano
-tablaMuestreo_tasa_ocupacion_Rural <- tablaMuestreo_tasa_ocupacion$tabla_Muestreo_rural
-
-
-tablaMuestreo_tasa_participacion <- f_CompletarTablaNacional(tabla_muestreo_urbano = tablaMuestreo_tasa_participacion_Urbana,
-                       tabla_muestreo_rural = tablaMuestreo_tasa_participacion_Rural,
-                       str_indicador = "tasa_participacion_prop",
-                       str_cve = "tasa_participacion_cve", 
-                       str_N = "N_activos")
-
-tablaMuestreo_tasa_participacion_Nacional <- tablaMuestreo_tasa_participacion$tabla_Muestreo_nacional
-tablaMuestreo_tasa_participacion_Urbana <- tablaMuestreo_tasa_participacion$tabla_Muestreo_urbano
-tablaMuestreo_tasa_participacion_Rural <- tablaMuestreo_tasa_participacion$tabla_Muestreo_rural
-```
-Imprimimos una por una las tablas resultantes a nivel nacional, para todos los indicadores de interés: pobreza, pobreza extrema, NBI y desocupación. 
-
-```{r}
-tablaMuestreo_pobreza_Nacional %>% flextable()
-```
-
-```{r}
-tablaMuestreo_pobrezaExtr_Nacional %>% flextable()
-```
-
-
-```{r}
-tablaMuestreo_NBI_Nacional %>% flextable()
-```
-
-
-```{r}
-tablaMuestreo_tasa_desocupacion_Nacional %>% flextable()
-```
-
-```{r}
-tablaMuestreo_tasa_ocupacion_Nacional %>% flextable()
-```
-
-
-```{r}
-tablaMuestreo_tasa_participacion_Nacional %>% flextable()
-```
-
-
-
 # 6. Integración de costos a las tablas de muestreo
 
 
 ```{r}
-f_costos <- function(tablaMuestreo_Urbana, tablaMuestreo_Rural, tablaMuestreo_Nacional){
+f_costos <- function(tablaMuestreo_Urbana, tablaMuestreo_Rural){
 tablaMuestreo_Urbana$Costos_UPM <- modelo_urbano$coefficients[1] + 
 tablaMuestreo_Urbana$HouseholdsPerPSU * modelo_urbano$coefficients[2] + 
 tablaMuestreo_Urbana$PSUinSample * modelo_urbano$coefficients[3] %>% round()
@@ -1108,15 +932,8 @@ tablaMuestreo_Rural$Costos_Total <- tablaMuestreo_Rural$Costos_UPM * tablaMuestr
 
 
 
-tablaMuestreo_Nacional$Costos_Total <- tablaMuestreo_Urbana$Costos_Total + 
-                                             tablaMuestreo_Rural$Costos_Total %>% round()
-
-tablaMuestreo_Nacional$Costos_UPM <- tablaMuestreo_Nacional$Costos_Total /  tablaMuestreo_Nacional$PSUinSample %>% round()
-
-tablaMuestreo_Nacional <- tablaMuestreo_Nacional %>% 
-  relocate(Costos_Total, .after = last_col())
-resultado <- list(tablaMuestreo_Nacional, tablaMuestreo_Urbana, tablaMuestreo_Rural)
-names(resultado) <- c("tablaMuestreo_Nacional", "tablaMuestreo_Urbana", "tablaMuestreo_Rural")
+resultado <- list(tablaMuestreo_Urbana, tablaMuestreo_Rural)
+names(resultado) <- c("tablaMuestreo_Urbana", "tablaMuestreo_Rural")
 resultado
 }
 ```
@@ -1126,16 +943,10 @@ Calculamos los costos que conlleva realizar una UPM para la tasa de desocupació
 
 ```{r}
 tablaMuestreo_tasa_desocupacion_Urbana <-  f_costos(tablaMuestreo_Urbana = tablaMuestreo_tasa_desocupacion_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_tasa_desocupacion_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_tasa_desocupacion_Nacional)$tablaMuestreo_Urbana
+         tablaMuestreo_Rural = tablaMuestreo_tasa_desocupacion_Rural)$tablaMuestreo_Urbana
 
 tablaMuestreo_tasa_desocupacion_Rural <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_tasa_desocupacion_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_tasa_desocupacion_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_tasa_desocupacion_Nacional)$tablaMuestreo_Rural
-
-tablaMuestreo_tasa_desocupacion_Nacional <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_tasa_desocupacion_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_tasa_desocupacion_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_tasa_desocupacion_Nacional)$tablaMuestreo_Nacional
+         tablaMuestreo_Rural = tablaMuestreo_tasa_desocupacion_Rural)$tablaMuestreo_Rural
 ```
 
 
@@ -1144,78 +955,54 @@ Calculamos los costos que conlleva realizar una UPM para la tasa de ocupación:
 
 ```{r}
 tablaMuestreo_tasa_ocupacion_Urbana <-  f_costos(tablaMuestreo_Urbana = tablaMuestreo_tasa_ocupacion_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_tasa_ocupacion_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_tasa_ocupacion_Nacional)$tablaMuestreo_Urbana
+         tablaMuestreo_Rural = tablaMuestreo_tasa_ocupacion_Rural)$tablaMuestreo_Urbana
 
 tablaMuestreo_tasa_ocupacion_Rural <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_tasa_ocupacion_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_tasa_ocupacion_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_tasa_ocupacion_Nacional)$tablaMuestreo_Rural
+         tablaMuestreo_Rural = tablaMuestreo_tasa_ocupacion_Rural)$tablaMuestreo_Rural
 
-tablaMuestreo_tasa_ocupacion_Nacional <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_tasa_ocupacion_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_tasa_ocupacion_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_tasa_ocupacion_Nacional)$tablaMuestreo_Nacional
 ```
 
 
 
 ```{r}
 tablaMuestreo_tasa_participacion_Urbana <-  f_costos(tablaMuestreo_Urbana = tablaMuestreo_tasa_participacion_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_tasa_participacion_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_tasa_participacion_Nacional)$tablaMuestreo_Urbana
+         tablaMuestreo_Rural = tablaMuestreo_tasa_participacion_Rural)$tablaMuestreo_Urbana
 
 tablaMuestreo_tasa_participacion_Rural <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_tasa_participacion_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_tasa_participacion_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_tasa_participacion_Nacional)$tablaMuestreo_Rural
+         tablaMuestreo_Rural = tablaMuestreo_tasa_participacion_Rural)$tablaMuestreo_Rural
 
-tablaMuestreo_tasa_participacion_Nacional <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_tasa_participacion_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_tasa_participacion_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_tasa_participacion_Nacional)$tablaMuestreo_Nacional
 ```
 
 
 
 ```{r}
 tablaMuestreo_pobreza_Urbana <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_pobreza_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_pobreza_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_pobreza_Nacional)$tablaMuestreo_Urbana
+         tablaMuestreo_Rural = tablaMuestreo_pobreza_Rural)$tablaMuestreo_Urbana
 
 tablaMuestreo_pobreza_Rural <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_pobreza_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_pobreza_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_pobreza_Nacional)$tablaMuestreo_Rural
-
-tablaMuestreo_pobreza_Nacional <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_pobreza_Urbana,          tablaMuestreo_Rural = tablaMuestreo_pobreza_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_pobreza_Nacional)$tablaMuestreo_Nacional
-
+         tablaMuestreo_Rural = tablaMuestreo_pobreza_Rural)$tablaMuestreo_Rural
 ```
 
 
 
 ```{r}
 tablaMuestreo_pobrezaExtr_Urbana <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_pobrezaExtr_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_pobrezaExtr_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_pobrezaExtr_Nacional)$tablaMuestreo_Urbana
+         tablaMuestreo_Rural = tablaMuestreo_pobrezaExtr_Rural)$tablaMuestreo_Urbana
 
 tablaMuestreo_pobrezaExtr_Rural <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_pobrezaExtr_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_pobrezaExtr_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_pobrezaExtr_Nacional)$tablaMuestreo_Rural
+         tablaMuestreo_Rural = tablaMuestreo_pobrezaExtr_Rural)$tablaMuestreo_Rural
 
-tablaMuestreo_pobrezaExtr_Nacional <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_pobrezaExtr_Urbana,          tablaMuestreo_Rural = tablaMuestreo_pobrezaExtr_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_pobrezaExtr_Nacional)$tablaMuestreo_Nacional
 ```
 
 
 
 ```{r}
 tablaMuestreo_NBI_Urbana <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_NBI_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_NBI_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_NBI_Nacional)$tablaMuestreo_Urbana
+         tablaMuestreo_Rural = tablaMuestreo_NBI_Rural)$tablaMuestreo_Urbana
 
 tablaMuestreo_NBI_Rural <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_NBI_Urbana, 
-         tablaMuestreo_Rural = tablaMuestreo_NBI_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_NBI_Nacional)$tablaMuestreo_Rural
+         tablaMuestreo_Rural = tablaMuestreo_NBI_Rural)$tablaMuestreo_Rural
 
-tablaMuestreo_NBI_Nacional <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_NBI_Urbana,          tablaMuestreo_Rural = tablaMuestreo_NBI_Rural, 
-         tablaMuestreo_Nacional = tablaMuestreo_NBI_Nacional)$tablaMuestreo_Nacional
 ```
 
 
@@ -1223,50 +1010,37 @@ tablaMuestreo_NBI_Nacional <- f_costos(tablaMuestreo_Urbana = tablaMuestreo_NBI_
 # 7. Exportación de resultados
 
 ```{r}
-lista_resultados_tasa_desocupacion <- list(tablaMuestreo_tasa_desocupacion_Urbana, tablaMuestreo_tasa_desocupacion_Rural, tablaMuestreo_tasa_desocupacion_Nacional)
-names(lista_resultados_tasa_desocupacion) <- c("tablaMuestreo_tasa_desocupacion_Urbana", "tablaMuestreo_tasa_desocupacion_Rural", "tablaMuestreo_tasa_desocupacion_Nacional")
+lista_resultados_tasa_desocupacion <- list(tablaMuestreo_tasa_desocupacion_Urbana, tablaMuestreo_tasa_desocupacion_Rural)
+names(lista_resultados_tasa_desocupacion) <- c("tablaMuestreo_tasa_desocupacion_Urbana", "tablaMuestreo_tasa_desocupacion_Rural")
 
-lista_resultados_tasa_ocupacion <- list(tablaMuestreo_tasa_ocupacion_Urbana, tablaMuestreo_tasa_ocupacion_Rural, tablaMuestreo_tasa_ocupacion_Nacional)
-names(lista_resultados_tasa_ocupacion) <- c("tablaMuestreo_tasa_ocupacion_Urbana", "tablaMuestreo_tasa_ocupacion_Rural", "tablaMuestreo_tasa_ocupacion_Nacional")
+lista_resultados_tasa_ocupacion <- list(tablaMuestreo_tasa_ocupacion_Urbana, tablaMuestreo_tasa_ocupacion_Rural)
+names(lista_resultados_tasa_ocupacion) <- c("tablaMuestreo_tasa_ocupacion_Urbana", "tablaMuestreo_tasa_ocupacion_Rural")
 
 
-lista_resultados_tasa_participacion <- list(tablaMuestreo_tasa_participacion_Urbana, tablaMuestreo_tasa_participacion_Rural, tablaMuestreo_tasa_participacion_Nacional)
-names(lista_resultados_tasa_participacion) <- c("tablaMuestreo_tasa_participacion_Urbana", "tablaMuestreo_tasa_participacion_Rural", "tablaMuestreo_tasa_participacion_Nacional")
+lista_resultados_tasa_participacion <- list(tablaMuestreo_tasa_participacion_Urbana, tablaMuestreo_tasa_participacion_Rural)
+names(lista_resultados_tasa_participacion) <- c("tablaMuestreo_tasa_participacion_Urbana", "tablaMuestreo_tasa_participacion_Rural")
 
-lista_resultados_pobreza <- list(tablaMuestreo_pobreza_Urbana, tablaMuestreo_pobreza_Rural, tablaMuestreo_pobreza_Nacional)
-names(lista_resultados_pobreza) <- c("tablaMuestreo_pobreza_Urbana", "tablaMuestreo_pobreza_Rural", "tablaMuestreo_pobreza_Nacional")
+lista_resultados_pobreza <- list(tablaMuestreo_pobreza_Urbana, tablaMuestreo_pobreza_Rural)
+names(lista_resultados_pobreza) <- c("tablaMuestreo_pobreza_Urbana", "tablaMuestreo_pobreza_Rural")
 
-lista_resultados_pobrezaExtr <- list(tablaMuestreo_pobrezaExtr_Urbana, tablaMuestreo_pobrezaExtr_Rural, tablaMuestreo_pobrezaExtr_Nacional)
-names(lista_resultados_pobrezaExtr) <- c("tablaMuestreo_pobrezaExtr_Urbana", "tablaMuestreo_pobrezaExtr_Rural", "tablaMuestreo_pobrezaExtr_Nacional")
+lista_resultados_pobrezaExtr <- list(tablaMuestreo_pobrezaExtr_Urbana, tablaMuestreo_pobrezaExtr_Rural)
+names(lista_resultados_pobrezaExtr) <- c("tablaMuestreo_pobrezaExtr_Urbana", "tablaMuestreo_pobrezaExtr_Rural")
 
-lista_resultados_NBI <- list(tablaMuestreo_NBI_Urbana, tablaMuestreo_NBI_Rural, tablaMuestreo_NBI_Nacional)
-names(lista_resultados_NBI) <- c("tablaMuestreo_NBI_Urbana", "tablaMuestreo_NBI_Rural", "tablaMuestreo_NBI_Nacional")
+lista_resultados_NBI <- list(tablaMuestreo_NBI_Urbana, tablaMuestreo_NBI_Rural)
+names(lista_resultados_NBI) <- c("tablaMuestreo_NBI_Urbana", "tablaMuestreo_NBI_Rural")
 
-lista_nacional <- list(tablaMuestreo_tasa_desocupacion_Nacional,
-                       tablaMuestreo_tasa_ocupacion_Nacional,
-                       tablaMuestreo_tasa_participacion_Nacional,
-                       tablaMuestreo_pobreza_Nacional,
-                       tablaMuestreo_pobrezaExtr_Nacional, tablaMuestreo_NBI_Nacional)
-names(lista_nacional) <- c("tablaMuestreo_tasa_desocupacion_Nacional",
-                           "tablaMuestreo_tasa_ocupacion_Nacional",
-                           "tablaMuestreo_tasa_participacion_Nacional",
-                           "tablaMuestreo_pobreza_Nacional",
-                       "tablaMuestreo_pobrezaExtr_Nacional",  
-                       "tablaMuestreo_NBI_Nacional")
 ```
 
 Exportamos los resultados:
 
 ```{r}
 
-names(lista_resultados_tasa_desocupacion) <- c("Urbana", "Rural", "Nacional")
-names(lista_resultados_tasa_ocupacion) <- c("Urbana", "Rural", "Nacional")
-names(lista_resultados_tasa_participacion) <- c("Urbana", "Rural", "Nacional")
-names(lista_resultados_pobreza) <- c("Urbana", "Rural", "Nacional")
-names(lista_resultados_pobrezaExtr) <- c("Urbana", "Rural", "Nacional")
-names(lista_resultados_NBI) <- c("Urbana", "Rural", "Nacional")
-names(lista_nacional) <- c("Desoc", "Ocup", "Particip", "Pobreza", "PobExtr", 
-                           "NBI")
+names(lista_resultados_tasa_desocupacion) <- c("Urbana", "Rural")
+names(lista_resultados_tasa_ocupacion) <- c("Urbana", "Rural")
+names(lista_resultados_tasa_participacion) <- c("Urbana", "Rural")
+names(lista_resultados_pobreza) <- c("Urbana", "Rural")
+names(lista_resultados_pobrezaExtr) <- c("Urbana", "Rural")
+names(lista_resultados_NBI) <- c("Urbana", "Rural")
 
 setwd("../output")
 write_xlsx(lista_resultados_tasa_desocupacion, "resultados_desocupacion.xlsx")
@@ -1275,7 +1049,6 @@ write_xlsx(lista_resultados_tasa_participacion, "resultados_tasa_participacion.x
 write_xlsx(lista_resultados_pobreza, "resultados_pobreza.xlsx")
 write_xlsx(lista_resultados_pobrezaExtr, "resultados_pobrezaExtr.xlsx")
 write_xlsx(lista_resultados_NBI, "resultados_NBI.xlsx")
-write_xlsx(lista_nacional, "resultados_nacional.xlsx")
 ```
 
 
@@ -1299,6 +1072,7 @@ consulta_N_rural <- df_censo %>% filter(areageo2 == 2) %>% group_by(region) %>%
   summarise(Nh = n())
 
 # Repartición proporcional
+# Hacer repartición de KISH !!
 nh_urbano <- n_urbano * (consulta_N_urbano$Nh / sum(consulta_N_urbano)) 
 nh_rural <- n_rural * (consulta_N_rural$Nh / sum(consulta_N_rural)) 
 
@@ -1405,20 +1179,20 @@ df_pobrezaExtr_region <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 8
                                r_indicador = "r_pobreza")
 
 df_pobrezaExtr_sexo <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 8323, 
-                                               n_rural = cubrimiento_panel* 7718,,
+                                               n_rural = cubrimiento_panel* 7718,
                                str_dominio = "sexo",
                                str_indicador = "pobrezaExtr" ,
                                r_indicador = "r_pobreza")
 
 
 df_pobrezaExtr_edad <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 8323, 
-                                               n_rural = cubrimiento_panel* 7718,,
+                                               n_rural = cubrimiento_panel* 7718,
                                str_dominio = "edadR",
                                str_indicador = "pobrezaExtr" ,
                                r_indicador = "r_pobreza")
 
 df_pobrezaExtr_area <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 8323, 
-                                               n_rural = cubrimiento_panel* 7718,,
+                                               n_rural = cubrimiento_panel* 7718,
                                str_dominio = "areageo2",
                                str_indicador = "pobrezaExtr" ,
                                r_indicador = "r_pobreza")
@@ -1436,21 +1210,21 @@ df_NBI_region <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 8323,
                                r_indicador = "r_pobreza")
 
 df_NBI_sexo <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 8323, 
-                                               n_rural = cubrimiento_panel* 7718,,
+                                               n_rural = cubrimiento_panel* 7718,
                                str_dominio = "sexo",
                                str_indicador = "NBI" ,
                                r_indicador = "r_pobreza")
 
 
 df_NBI_edad <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 8323, 
-                                               n_rural = cubrimiento_panel* 7718,,
+                                               n_rural = cubrimiento_panel* 7718,
                                str_dominio = "edadR",
                                str_indicador = "NBI" ,
                                r_indicador = "r_pobreza")
 
 
 df_NBI_area <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 8323, 
-                                               n_rural = cubrimiento_panel* 7718,,
+                                               n_rural = cubrimiento_panel* 7718,
                                str_dominio = "areageo2",
                                str_indicador = "NBI" ,
                                r_indicador = "r_pobreza")
@@ -1472,7 +1246,7 @@ df_Desocupacion_region <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 
                                r_indicador = "r_activos")
 
 df_Desocupacion_sexo <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 8323, 
-                                               n_rural = cubrimiento_panel* 7718,,
+                                               n_rural = cubrimiento_panel* 7718,
                                str_dominio = "sexo",
                                str_indicador = "tasa_desocupacion" ,
                                r_indicador = "r_activos")
@@ -1484,7 +1258,7 @@ df_Desocupacion_edad <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 83
                                r_indicador = "r_activos")
 
 df_Desocupacion_area <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 8323, 
-                                               n_rural = cubrimiento_panel* 7718,,
+                                               n_rural = cubrimiento_panel* 7718,
                                str_dominio = "areageo2",
                                str_indicador = "tasa_desocupacion" ,
                                r_indicador = "r_activos")
@@ -1504,19 +1278,19 @@ df_Desocupacion_region <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 
                                r_indicador = "r_activos")
 
 df_Desocupacion_sexo <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 8323, 
-                                               n_rural = cubrimiento_panel* 7718,,
+                                               n_rural = cubrimiento_panel* 7718,
                                str_dominio = "sexo",
                                str_indicador = "tasa_desocupacion" ,
                                r_indicador = "r_activos")
 
 df_Desocupacion_edad <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 8323, 
-                                               n_rural = cubrimiento_panel* 7718,,
+                                               n_rural = cubrimiento_panel* 7718,
                                str_dominio = "edadR",
                                str_indicador = "tasa_desocupacion" ,
                                r_indicador = "r_activos")
 
 df_Desocupacion_area <- f_calculo_margen_error(n_urbano = cubrimiento_panel * 8323, 
-                                               n_rural = cubrimiento_panel* 7718,,
+                                               n_rural = cubrimiento_panel* 7718,
                                str_dominio = "areageo2",
                                str_indicador = "tasa_desocupacion" ,
                                r_indicador = "r_activos")
@@ -1582,7 +1356,50 @@ df_Desocupacion <- me_calculo(N = sum(df_ParamGenerales$N),
 ```
 
 
+# Consolidación información por dominios y nacional
+
+
+```{r}
+bind_rows(df_pobreza_region, df_pobreza)
+```
+
+
+```{r}
+bind_rows(df_pobreza_area, df_pobreza)
+```
+
+
+
+
+```{r}
+bind_rows(df_pobrezaExtr_region, df_pobrezaExtr)
+```
+
+```{r}
+bind_rows(df_pobrezaExtr_area, df_pobrezaExtr)
+```
+
+
+
+
+```{r}
+bind_rows(df_NBI_region, df_NBI)
+```
+
+
+```{r}
+bind_rows(df_NBI_region, df_NBI)
+
+```
+
+
+
 ```{r}
 bind_rows(df_Desocupacion_region, df_Desocupacion)
+```
+
+
+```{r}
+bind_rows(df_Desocupacion_area, df_Desocupacion)
 ```
 

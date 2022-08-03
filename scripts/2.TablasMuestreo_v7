@@ -1581,6 +1581,7 @@ df_Desocupacion <- me_calculo(N = sum(df_ParamGenerales$N),
                                      conf = 0.95, m = 6)
 ```
 
+# Consolidación información por dominios y nacional
 
 ```{r}
 bind_rows(df_Desocupacion_region, df_Desocupacion)
