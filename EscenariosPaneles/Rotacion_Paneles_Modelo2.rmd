@@ -74,7 +74,7 @@ Generamos el esquema rotativo 5-0-0 con la primera función leída:
 
 ```{r, warning = FALSE, message = FALSE}
 # Número de trimestres, cada año tiene 4 trimestres
-num_trimestres <- 52
+num_trimestres <- 52 # 13 * 4
 paneles <- cbind(panelesRotativos(5, 0, 0, num_trimestres), 
                  panelesRotativos(5, 0, 0, num_trimestres, letra_inicial = "F"),
                  panelesRotativos(5, 0, 0, num_trimestres, letra_inicial = "K"))
@@ -331,7 +331,7 @@ head(datos_UPMS_rural) %>% flextable()
 En este proceso se realiza el esquema rotacional en 4 pasos:
 
 -   A. Inicialización de esquema rotacional
--   B. Construcción del esquema rotativo en cada estrato (aprox 2 minutos)
+-   B. Construcción del esquema rotativo en cada estrato (aprox 1 minuto)
 -   C. Revisión de coherencia del panel
 -   D. Organización de salidas
 
@@ -479,6 +479,31 @@ df_estratoPaneles_rural <- df_estratoPaneles_rural[c("Estrato_Panel", "Estrato",
 ```
 
 
-DESCRIPTIVAS.
-Conformación de los modulos (pobreza y desempleo.)
-Trimestre a trimesre a trimestre
+
+
+Unificamos el df_estratoPanes
+
+```{r}
+df_estratoPaneles_urbano$zona <- "Urbano"
+df_estratoPaneles_rural$zona <- "Rural"
+
+df_estratoPaneles <- bind_rows(df_estratoPaneles_urbano, df_estratoPaneles_rural)
+```
+
+
+Extraer las letras de cada trimestre:
+
+```{r}
+# i = 1
+lst_nI_upm <- vector(mode = "list", length = nrow(paneles))
+for(i in 1:nrow(paneles)){
+  letras_trimestre <- as.character(paneles[i,])
+  # Filtramos por las letras_trimestres en df_estratoPaneles
+  lst_nI_upm[[i]] <- df_estratoPaneles %>% 
+                     filter(Paneles %in% letras_trimestre & SeleccionUPM == 1) %>%
+                     group_by(Estrato, zona) %>% 
+                     summarise(nI_upm = n_distinct(UPM)) %>% mutate(trimestre = i)
+  
+}
+df_nI_upm <- lst_nI_upm %>% bind_rows()
+```

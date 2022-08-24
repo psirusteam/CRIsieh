@@ -1,0 +1,1018 @@
+---
+title: "Proceso de Estratificacion"
+author: "José Fernando Zea"
+date: '2022-08-24'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+1. Exploración de la base censal
+
+```{r}
+rm(list = ls())
+# library(plyr)
+library(tidyverse)
+library(dtplyr)
+library(haven)
+library(arrow)
+library(labelled)
+library(flextable)
+library(magrittr)
+library(stratification)
+library(SamplingStrata)
+library(FactoMineR)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+# setwd("../data/datos_estratificacion")
+# censo <- haven::read_sav("CR_CENSO2011_NISE_V3_1.sav")
+```
+
+```{r, warning=FALSE, message=FALSE}
+setwd("../data/datos_estratificacion")
+censords <- readRDS("censords.Rds")
+```
+
+Generamos los hogares de Costa Rica:
+
+```{r}
+tabla_hogar <- censords %>%
+  group_by(ident_hogar) %>%
+  summarise(nper = n()) %>%
+  as.data.frame()
+```
+
+Seleccionamos las variables relevantes y le integramos el número de personas:
+
+```{r}
+df_hogar <- censords %>%
+  filter(P01_PARENTESCO == 1) %>%
+  select(ident_hogar,
+         ID_REGION,
+         ID_PROVINCIA,
+         ID_PCD,
+         ID_ZONA,
+         V01_TIPO_VIVIENDA,
+         V02_OCUPACION,
+         UPM2,
+         VIVIENDAS_COLECTIVAS,
+         V18C_TV_PLASMA_LCD,
+         V18E_TV_CABLE_SATELITE,
+         V18J_INTERNET,
+         V18K_CARRO,
+         V05_MATERIAL_TECHO,
+         V04_MATERIAL_PAREDES,
+         V07_MATERIAL_PISO,
+         NSE_UPM) %>% 
+  left_join(tabla_hogar)
+```
+
+
+Se genera la tabla de las UPMs:
+
+```{r}
+df_UPM <- df_hogar %>%
+  group_by(UPM2) %>%
+  summarise(
+    nviv = n(),
+    region = first(ID_REGION),
+    area = first(ID_ZONA),
+    distrito = first(ID_PCD),
+    nise = first(NSE_UPM)
+  )
+```
+
+
+# Algunas estadísticas descriptivas
+
+```{r, warning=FALSE, message=FALSE}
+consulta_area <- df_UPM %>%
+  group_by(area) %>%
+  summarise(
+    nupm = n(),
+    min_viv = min(nviv),
+    prom_viv = mean(nviv),
+    medi_viv = median(nviv),
+    min_viv = min(nviv),
+    max_viv = max(nviv),
+    sd_viv = sd(nviv)
+  )
+consulta_area %>% flextable()
+```
+
+El número de viviendas por región se analiza a continuación:
+
+```{r, warning=FALSE, message=FALSE}
+consulta_region <- df_UPM %>%
+  group_by(region, area) %>%
+  summarise(
+    nupm = n(),
+    min = min(nviv),
+    prom = mean(nviv),
+    medi = median(nviv),
+    min = min(nviv),
+    max = max(nviv),
+    sd = sd(nviv)
+  )
+consulta_region %>% flextable()
+```
+
+Se analiza el número de viviendas por el distrito:
+
+```{r, warning=FALSE, message=FALSE}
+consulta_distrito <- df_UPM %>%
+  group_by(distrito) %>%
+  summarise(
+    min = min(nviv),
+    prom = mean(nviv),
+    medi = median(nviv),
+    min = min(nviv),
+    max = max(nviv),
+    sd = sd(nviv)
+  )
+consulta_distrito %>% flextable()
+```
+
+# Exportamos las tablas
+
+```{r, eval=FALSE}
+setwd("../output/estratificacion/1.tablas_seleccionadas")
+saveRDS(df_hogar, "df_hogar.rds")
+saveRDS(df_UPM, "df_UPM.rds")
+```
+
+# 2. Habitantes de calle 
+
+Se realiza el tratamiento de los hogares colectivos y habitantes de calle, identificar hogares y viviendas comunales y habitantes de calle.
+
+Las personas con tipo de vivienda 9 en adelante y que no son residentes habituales son clasificadas como habitantes de viviendas comunales y habitantes de calle: 
+
+```{r}
+val_labels(df_hogar$V01_TIPO_VIVIENDA)
+```
+
+```{r}
+val_labels(df_hogar$V02_OCUPACION)
+```
+
+```{r}
+df_hogar_ocupa <- df_hogar %>%
+  mutate(ocupados = case_when(
+    V01_TIPO_VIVIENDA <= 8 & V02_OCUPACION <= 2 ~ 1,
+    TRUE ~ 0
+  ))
+table(df_hogar_ocupa$ocupados, useNA = "always")
+```
+
+
+```{r}
+################ Guardar archivo de personas ###############################
+df_pers <- right_join(censords,
+                      df_hogar_ocupa[c("ident_hogar")],
+                      by = "ident_hogar")
+```
+
+Guardar personas que no tiene hogares comunales ni con habitantes de calle:
+
+```{r, eval=FALSE}
+saveRDS(df_pers, "../output/estratificacion/2.tablas_sinHogComunHabitCalle/df_pers.rds")
+```
+
+```{r}
+saveRDS(df_hogar_ocupa, "../output/estratificacion/2.tablas_sinHogComunHabitCalle/df_hogar_ocupa.rds")
+```
+
+
+```{r}
+gc(reset = T)
+```
+
+Conservar df_hogar_ocupa, df_pers y df_UPM 
+
+```{r}
+rm(list = ls()[!ls() %in% c("df_hogar_ocupa", "df_pers", "df_UPM")])
+gc(reset = T)
+```
+
+# 3. Indicadores a nivel de UPM
+
+
+# a. Características de las viviendas
+
+```{r}
+labelled::generate_dictionary(df_hogar_ocupa %>% select(V07_MATERIAL_PISO,
+                                                        V04_MATERIAL_PAREDES,
+                                                        V05_MATERIAL_TECHO))
+df_hogar_ocupa %<>%
+  mutate(
+    pisos = case_when(V07_MATERIAL_PISO == 1 ~ 1,
+                      TRUE ~ 0),
+    paredes = case_when(V04_MATERIAL_PAREDES == 1 ~ 1,
+                        TRUE ~ 0),
+    techos = case_when(V05_MATERIAL_TECHO == 1 ~ 1,
+                       TRUE ~ 0)
+  )
+
+prop.table(table(df_hogar_ocupa$V05_MATERIAL_TECHO))
+summary(df_hogar_ocupa$pisos)
+summary(df_hogar_ocupa$paredes)
+summary(df_hogar_ocupa$techos)
+```
+
+```{r}
+var_agreg_caracViv <- df_hogar_ocupa %>%
+  group_by(UPM2) %>%
+  summarise(
+    pisos = mean(pisos),
+    paredes = mean(paredes),
+    techos = mean(techos)
+  )
+```
+
+# b. Tenencia de enseres
+
+```{r}
+labelled::generate_dictionary(
+  df_hogar_ocupa %>%
+    select(
+      V18C_TV_PLASMA_LCD,
+      V18E_TV_CABLE_SATELITE,
+      V18J_INTERNET,
+      V18K_CARRO
+    )
+)
+
+df_hogar_ocupa %<>%
+  mutate(
+    plasma = case_when(V18C_TV_PLASMA_LCD == 1 ~ 1,
+                      TRUE ~ 0),
+    cable = case_when(V18E_TV_CABLE_SATELITE == 1 ~ 1,
+                        TRUE ~ 0),
+    internet = case_when(V18J_INTERNET == 1 ~ 1,
+                       TRUE ~ 0),
+    carro = case_when(V18K_CARRO == 1 ~ 1,
+                      TRUE ~ 0),
+  )
+
+prop.table(table(df_hogar_ocupa$V18C_TV_PLASMA_LCD))
+summary(df_hogar_ocupa$plasma)
+summary(df_hogar_ocupa$cable)
+summary(df_hogar_ocupa$internet)
+summary(df_hogar_ocupa$carro)
+
+var_agreg_enseres <- df_hogar_ocupa %>%
+  group_by(UPM2) %>%
+  summarise(
+    plasma = mean(plasma),
+    cable = mean(cable),
+    internet = mean(internet),
+    carro = mean(carro)
+  )
+```
+
+# c. Integración indicadores
+
+```{r}
+df_varEstratif <- var_agreg_caracViv %>% 
+  left_join(var_agreg_enseres, by =  "UPM2") %>% 
+  left_join(df_UPM, df_varEstratif,  by =  "UPM2")
+summary(df_varEstratif)
+```
+
+```{r}
+saveRDS(df_varEstratif, "../output/estratificacion/3.Indicadores_UPM/df_varEstratif.rds")
+```
+
+Cálculo de correlaciones:
+
+```{r}
+m <- cor(df_varEstratif[c("pisos", "paredes", "techos", 
+                          "plasma", "cable", "internet", "carro")])
+
+round(cor(m, use = "pairwise.complete.obs"), 2)
+corrplot::corrplot(cor(m))
+```
+
+
+
+# 4. Estratificación multivariada
+
+Cargamos las funciones de estratificación:
+
+```{r}
+source("funcion/f_estratificacionMultivariante.R", encoding = "UTF-8")
+```
+
+Las variables a estratificar son:
+
+```{r}
+
+####################### filtrar las  variables de interés a estratificar ########################
+variables_estratificacion <- c("pisos",
+                               "paredes",
+                               "techos",
+                               "plasma",
+                               "cable",
+                               "internet",
+                               "carro")
+# Evaluación
+
+variablesParaEvaluar <- c("pisos",
+                          "paredes",
+                          "techos",
+                          "plasma",
+                          "cable",
+                          "internet",
+                          "carro")
+```
+
+
+# a. Métodode Jarque (3 estratos)
+
+```{r}
+df_varEstratif$estrato3H_jarque <-
+  Estratif_kmeans(
+    Matriz_Estratificacion = df_varEstratif[variables_estratificacion],
+    num_estratos = 3,
+    variable_evaluacion_orden_estrato = "pisos",
+    nombre_estrato_Construido = "estratoH3_Jarque",
+    semilla = 12345,
+    metodo = "Jarque"
+  )
+
+# Visualizacion
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato3H_jarque,
+          main = i)
+}
+
+
+############### Evaluación de los estratos #############################
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato3H_jarque"),
+                              by = "UPM2")
+
+dff_jarqueE3 <- numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_jarqueE3[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i],
+                       "estrato3H_jarque")
+}
+names(dff_jarqueE3) <- variablesParaEvaluar
+dff_jarqueE3
+
+deff_generalizado_jarque_E3 <- sum(dff_jarqueE3)
+```
+
+# b. Métodode Jarque (4 estratos)
+
+```{r}
+df_varEstratif$estrato4H_jarque <-
+  Estratif_kmeans(
+    df_varEstratif[variables_estratificacion],
+    4,
+    "pisos",
+    "estratoH3_Jarque",
+    semilla = 12345,
+    metodo = "Jarque"
+  )
+
+
+# Visualizacion
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato4H_jarque,
+          main = i)
+}
+
+############### Evaluación de los estratos con Jarque #############################
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato4H_jarque"),
+                              by = "UPM2")
+
+dff_jarqueE4 <- numeric(length(variablesParaEvaluar))
+
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_jarqueE4[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato4H_jarque")
+}
+names(dff_jarqueE4) <- variablesParaEvaluar
+dff_jarqueE4
+deff_generalizado_jarque_E4 <- sum(dff_jarqueE4)
+```
+
+
+# c. Métodode K-means (3 estratos)
+
+
+```{r}
+df_varEstratif$estrato3H_Kmeans <-
+  Estratif_kmeans(
+    df_varEstratif[variables_estratificacion],
+    3,
+    "pisos",
+    "estrato3H_Kmeans",
+    semilla = 12345,
+    metodo = "Kmeans"
+  )
+
+# Visualizacion
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato3H_Kmeans,
+          main = i)
+}
+
+############### Evaluación de los estratos #############################
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato3H_Kmeans"),
+                              by = "UPM2")
+
+dff_kmeansE3 <- numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_kmeansE3[i] <-
+    deff_estratificado(df_varEstratif, variablesParaEvaluar[i], "estrato3H_Kmeans")
+}
+names(dff_kmeansE3) <- variablesParaEvaluar
+dff_kmeansE3
+deff_generalizado_kmeans_E3 <- sum(dff_kmeansE3)
+```
+
+
+
+# d. Métodode K-means (4 estratos)
+
+```{r}
+df_varEstratif$estrato4H_kmeans <-
+  Estratif_kmeans(
+    df_varEstratif[variables_estratificacion],
+    4,
+    "pisos",
+    "estrato4H_Kmeans",
+    semilla = 12345,
+    metodo = "Kmeans"
+  )
+
+
+# Visualizacion
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato4H_kmeans,
+          main = i)
+}
+
+
+############### Evaluación de los estratos con Jarque #############################
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato4H_kmeans"),
+                              by = "UPM2")
+
+dff_kmeansE4 <- numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_kmeansE4[i] <-
+    deff_estratificado(df_varEstratif, variablesParaEvaluar[i], "estrato4H_kmeans")
+}
+names(dff_kmeansE4) <- variablesParaEvaluar
+dff_kmeansE4
+deff_generalizado_kmeans_E4 <- sum(dff_kmeansE4)
+```
+
+
+# Evaluación de los estratos
+
+```{r}
+# Visualizacion
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$nise,
+          main = i)
+}
+
+############### Evaluación de los estratos #############################
+dff_niseE3 <- numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_niseE3[i] <-
+    deff_estratificado(df_varEstratif, variablesParaEvaluar[i], "nise")
+}
+names(dff_niseE3) <- variablesParaEvaluar
+dff_niseE3
+deff_generalizado_dff_niseE3 <- sum(dff_niseE3)
+
+############################## Fin de estratificación NISE Costa Rica ##################################
+
+dff_H3 <- cbind(dff_jarqueE3,
+                dff_kmeansE3,
+                dff_niseE3)
+
+deff_generalizado_E3 <- c(deff_generalizado_jarque_E3,
+                          deff_generalizado_kmeans_E3,
+                          deff_generalizado_dff_niseE3)
+
+resumen_H3 <- rbind(dff_H3, deff_generalizado_E3)
+resumen_H3 <- as.data.frame(resumen_H3)
+resumen_H3$Variables <- row.names(resumen_H3)
+row.names(resumen_H3) <- NULL
+resumen_H3$Variables[resumen_H3$Variables == "deff_generalizado_E3"] <-
+  "deff_general."
+resumen_H3$sec <- 1:nrow(resumen_H3)
+
+dff_H4 <- cbind(dff_jarqueE4,
+                dff_kmeansE4)
+deff_generalizado_E4 <- c(deff_generalizado_jarque_E4,
+                          deff_generalizado_kmeans_E4)
+
+resumen_H4 <- rbind(dff_H4, deff_generalizado_E4)
+resumen_H4 <- as.data.frame(resumen_H4)
+#resumen_H4$Variables <- row.names(resumen_H4)
+row.names(resumen_H4) <- NULL
+resumen_H4$sec <- 1:nrow(resumen_H4)
+
+
+resumen <- merge(resumen_H3, resumen_H4, by = "sec") %>% 
+  select("sec", "Variables", matches("dff"))
+```
+
+
+Guardamos la estraticación multivariada:
+
+```{r}
+saveRDS(resumen, "../output/estratificacion/4.estratificacionMultivariada/resumen_EstratificacionesMultivariadas.rds")
+saveRDS(df_varEstratif, "../output/estratificacion/4.estratificacionMultivariada/df_varEstratif_Multivariadas.rds")
+```
+
+
+# 5. Estratificación univariada
+
+Leemos la función para calcular el deff:
+
+```{r}
+source("funcion/f_estratificacionUnivariante.R", encoding = "UTF-8")
+```
+
+Realizamos el proceso de componentes principales:
+
+```{r}
+####################### ACP ########################
+datos_ACP <- df_varEstratif[variables_estratificacion]
+acp <- FactoMineR::PCA(datos_ACP)
+acp$eig
+
+# Primera componente principal
+df_varEstratif$Factor1 <- acp$ind$coord[, 1]
+Factor_Posit <- scale(df_varEstratif$Factor1) + 10
+Factor_Posit <- as.numeric(Factor_Posit)
+summary(Factor_Posit)
+hist(Factor_Posit)
+```
+
+# a. Dalenius - Hodges (3 estratos)
+
+```{r}
+H <- 3
+
+# Daleniuous and Hodge
+estratif_danelniusH3 <-
+  strata.cumrootf(
+    x = Factor_Posit ,
+    Ls = H,
+    CV = 0.03,
+    alloc = c(0.5, 0, 0.5)
+  )
+
+df_varEstratif$estrato_Dalenius3 <- estratif_danelniusH3$stratumID
+
+
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_Dalenius3,
+          main = i)
+}
+
+############### Evaluación de los estratos #############################
+
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_Dalenius3"),
+                              by = "UPM2")
+
+dff_Dalenius3 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_Dalenius3[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_Dalenius3")
+}
+names(dff_Dalenius3) <- variablesParaEvaluar
+dff_Dalenius3
+deff_generalizado_Dalenius_E3 <- sum(dff_Dalenius3)
+```
+
+# b. Dalenius - Hodges (4 estratos)
+
+```{r}
+H <- 4
+# hist(Factor_Posit)
+# Daleniuous and Hodge
+estratif_danelniusH4 <-
+  strata.cumrootf(
+    x = Factor_Posit ,
+    Ls = H,
+    CV = 0.03,
+    alloc = c(0.5, 0, 0.5)
+  )
+
+df_varEstratif$estrato_Dalenius4 <- estratif_danelniusH4$stratumID
+
+
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_Dalenius4,
+          main = i)
+}
+
+
+############### Evaluación de los estratos #############################
+
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_Dalenius4"),
+                              by = "UPM2")
+
+dff_Dalenius4 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_Dalenius4[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_Dalenius4")
+}
+names(dff_Dalenius4) <- variablesParaEvaluar
+dff_Dalenius4
+deff_generalizado_Dalenius_E4 <- sum(dff_Dalenius4)
+```
+
+# c. Gunning and Horgan - Geometric Method (3 estratos)
+
+```{r}
+H <- 3
+# hist(Factor_Posit)
+# Geo
+estratif_geoH3 <- strata.geo(
+  x = Factor_Posit ,
+  Ls = H,
+  CV = 0.03,
+  alloc = c(0.5, 0, 0.5)
+)
+
+df_varEstratif$estrato_geo3 <- estratif_geoH3$stratumID
+
+
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_geo3,
+          main = i)
+}
+
+
+############### Evaluación de los estratos #############################
+
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_geo3"),
+                              by = "UPM2")
+
+dff_geo3 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_geo3[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_geo3")
+}
+names(dff_geo3) <- variablesParaEvaluar
+dff_geo3
+deff_generalizado_geo_E3 <- sum(dff_geo3)
+```
+
+# d. Gunning and Horgan - Geometric Method (4 estratos)
+
+```{r}
+H <- 4
+# hist(Factor_Posit)
+# Daleniuous and Hodge
+estratif_geoH4 <- strata.geo(
+  x = Factor_Posit ,
+  Ls = H,
+  CV = 0.03,
+  alloc = c(0.5, 0, 0.5)
+)
+
+df_varEstratif$estrato_geo4 <- estratif_geoH4$stratumID
+
+
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_geo4,
+          main = i)
+}
+
+
+############### Evaluación de los estratos #############################
+
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_geo4"),
+                              by = "UPM2")
+
+dff_geo4 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_geo4[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_geo4")
+}
+names(dff_geo4) <- variablesParaEvaluar
+dff_geo4
+deff_generalizado_geo_E4 <- sum(dff_geo4)
+```
+
+
+
+# e. LH Sehthi (3 estratos)
+
+```{r}
+H <- 3
+# hist(Factor_Posit)
+# LH_Sethi
+estratif_LH_SethiH3 <-
+  strata.LH(
+    x = Factor_Posit ,
+    Ls = H,
+    CV = 0.03,
+    alloc = c(0.5, 0, 0.5),
+    algo = "Sethi"
+  )
+
+df_varEstratif$estrato_LH_Sethi3 <- estratif_LH_SethiH3$stratumID
+
+
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_LH_Sethi3,
+          main = i)
+}
+
+
+############### Evaluación de los estratos #############################
+
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_LH_Sethi3"),
+                              by = "UPM2")
+
+dff_LH_Sethi3 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_LH_Sethi3[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_LH_Sethi3")
+}
+names(dff_LH_Sethi3) <- variablesParaEvaluar
+dff_LH_Sethi3
+deff_generalizado_LH_Sethi_E3 <- sum(dff_LH_Sethi3)
+```
+
+# f. LH Sehthi (4 estratos)
+
+```{r}
+H <- 4
+# hist(Factor_Posit)
+# Daleniuous and Hodge
+estratif_LH_SethiH4 <-
+  strata.LH(
+    x = Factor_Posit ,
+    Ls = H,
+    CV = 0.03,
+    alloc = c(0.5, 0, 0.5),
+    algo = "Sethi"
+  )
+
+df_varEstratif$estrato_LH_Sethi4 <- estratif_LH_SethiH4$stratumID
+
+
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_LH_Sethi4,
+          main = i)
+}
+
+
+############### Evaluación de los estratos #############################
+
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_LH_Sethi4"),
+                              by = "UPM2")
+
+dff_LH_Sethi4 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_LH_Sethi4[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_LH_Sethi4")
+}
+names(dff_LH_Sethi4) <- variablesParaEvaluar
+dff_LH_Sethi4
+deff_generalizado_LH_Sethi_E4 <- sum(dff_LH_Sethi4)
+```
+
+# g. LH Kozak (3 estratos)
+
+```{r}
+H <- 3
+# hist(Factor_Posit)
+# LH_Kozak
+estratif_LH_KozakH3 <-
+  strata.LH(
+    x = Factor_Posit ,
+    Ls = H,
+    CV = 0.03,
+    alloc = c(0.5, 0, 0.5),
+    algo = "Kozak"
+  )
+
+df_varEstratif$estrato_LH_Kozak3 <- estratif_LH_KozakH3$stratumID
+
+
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_LH_Kozak3,
+          main = i)
+}
+
+
+############### Evaluación de los estratos #############################
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_LH_Kozak3"),
+                              by = "UPM2")
+
+dff_LH_Kozak3 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_LH_Kozak3[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_LH_Kozak3")
+}
+names(dff_LH_Kozak3) <- variablesParaEvaluar
+dff_LH_Kozak3
+deff_generalizado_LH_Kozak_E3 <- sum(dff_LH_Kozak3)
+```
+
+# h. LH Kozak (4 estratos)
+
+```{r}
+H <- 4
+# hist(Factor_Posit)
+# Daleniuous and Hodge
+estratif_LH_KozakH4 <-
+  strata.LH(
+    x = Factor_Posit ,
+    Ls = H,
+    CV = 0.03,
+    alloc = c(0.5, 0, 0.5),
+    algo = "Kozak"
+  )
+
+df_varEstratif$estrato_LH_Kozak4 <- estratif_LH_KozakH4$stratumID
+
+
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_LH_Kozak4,
+          main = i)
+}
+
+
+############### Evaluación de los estratos #############################
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_LH_Kozak4"),
+                              by = "UPM2")
+
+dff_LH_Kozak4 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_LH_Kozak4[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_LH_Kozak4")
+}
+names(dff_LH_Kozak4) <- variablesParaEvaluar
+dff_LH_Kozak4
+deff_generalizado_LH_Kozak_E4 <- sum(dff_LH_Kozak4)
+```
+
+
+# i. Percentiles (3 estratos)
+
+```{r}
+H <- 3
+# hist(Factor_Posit)
+# LH_Kozak
+
+estratif_estrato_Per3  <- quantile(Factor_Posit,
+                                   probs = seq(0, 1, by = 1 / H),)
+
+df_varEstratif$estrato_Per3 <- cut(
+  Factor_Posit,
+  breaks = estratif_estrato_Per3,
+  include.lowest = T,
+  right = F,
+  label = 1:H
+)
+
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_Per3,
+          main = i)
+}
+
+
+############### Evaluación de los estratos #############################
+
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_Per3"),
+                              by = "UPM2")
+
+dff_Per3 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_Per3[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_Per3")
+}
+names(dff_Per3) <- variablesParaEvaluar
+dff_Per3
+deff_generalizado_Per3 <- sum(dff_Per3)
+```
+
+# j. Percentiles  (4 estratos)
+
+```{r}
+H <- 4
+# hist(Factor_Posit)
+# LH_Kozak
+estratif_estrato_Per4  <- quantile(Factor_Posit,
+                                   probs = seq(0, 1, by = 1 / H),)
+
+df_varEstratif$estrato_Per4 <- cut(
+  Factor_Posit,
+  breaks = estratif_estrato_Per4,
+  include.lowest = T,
+  right = F,
+  label = 1:H
+)
+
+for (i in variables_estratificacion) {
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_Per4,
+          main = i)
+}
+
+
+############### Evaluación de los estratos #############################
+
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_Per4"),
+                              by = "UPM2")
+
+dff_Per4 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_Per4[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_Per4")
+}
+names(dff_Per4) <- variablesParaEvaluar
+dff_Per4
+deff_generalizado_Per4 <- sum(dff_Per4)
+```
+
+
+# k. Generación de tablas finales estratificacion Univariada
+
+```{r}
+dff_H3 <- cbind(dff_Dalenius3,
+                dff_geo3,
+                dff_LH_Sethi3,
+                dff_LH_Kozak3,
+                dff_Per3)
+
+deff_generalizado_E3 <- c(
+  deff_generalizado_Dalenius_E3,
+  deff_generalizado_geo_E3,
+  deff_generalizado_LH_Sethi_E3,
+  deff_generalizado_LH_Kozak_E3,
+  deff_generalizado_Per3
+)
+
+resumen_H3 <- rbind(dff_H3, deff_generalizado_E3)
+resumen_H3 <- as.data.frame(resumen_H3)
+resumen_H3$Variables <- row.names(resumen_H3)
+row.names(resumen_H3) <- NULL
+resumen_H3$Variables[resumen_H3$Variables == "deff_generalizado_E3"] <-
+  "deff_general."
+resumen_H3$sec <- 1:nrow(resumen_H3)
+
+
+
+dff_H4 <- cbind(dff_Dalenius4,
+                dff_geo4,
+                dff_LH_Sethi4,
+                dff_LH_Kozak4,
+                dff_Per4)
+
+deff_generalizado_E4 <- c(
+  deff_generalizado_Dalenius_E4,
+  deff_generalizado_geo_E4,
+  deff_generalizado_LH_Sethi_E4,
+  deff_generalizado_LH_Kozak_E4,
+  deff_generalizado_Per4
+)
+
+resumen_H4 <- rbind(dff_H4, deff_generalizado_E4)
+resumen_H4 <- as.data.frame(resumen_H4)
+#resumen_H4$Variables <- row.names(resumen_H4)
+row.names(resumen_H4) <- NULL
+resumen_H4$sec <- 1:nrow(resumen_H4)
+
+resumen <- merge(resumen_H3, resumen_H4, by = "sec") %>% 
+  select("sec", "Variables", matches("dff"))
+```
+
+
+```{r}
+saveRDS(resumen, "../output/estratificacion/5.estratificacionUnivariada/resumen_EstratificacionesACP.rds")
+saveRDS(df_varEstratif, "../output/estratificacion/5.estratificacionUnivariada/df_varEstratif_ACP.rds")
+```
+
