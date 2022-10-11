@@ -1,0 +1,83 @@
+---
+title: "Capítulo 1"
+author: "José Fernando Zea"
+date: '2022-10-03'
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+library(arrow)
+library(dplyr)
+library(ggplot2)
+library(flextable)
+library(gridExtra)
+library(samplesize4surveys)
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+setwd("../data/")
+df_censo <- open_dataset("parquet")
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+df_censo <- df_censo %>% 
+  select("CONSE", "Llave", "Llave_Pers", "ident_hogar", "Hogares", "ID_VIVIENDA", 
+"V01_TIPO_VIVIENDA", "V02_OCUPACION", "UGM2", "UPM2", "ID_PROVINCIA", 
+"ID_PC", "ID_PCD", "ID_HOGAR", "Ocupados", "NBI") %>% collect()
+```
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+df_censo$id_vivienda <- substr(df_censo$ident_hogar, 1, 12)
+```
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+consulta_vivXupm <- df_censo %>% group_by(UPM2, id_vivienda) %>% summarise(temp = n()) %>% ungroup() %>%
+   group_by(UPM2) %>% summarise(num_vivXupm = n())
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+consulta1 <- quantile(consulta_vivXupm$num_vivXupm, probs = seq(0, 1, 0.1)) %>% as.data.frame()
+consulta1 <- consulta1 %>% tibble::rownames_to_column()
+names(consulta1) <- c("Percentil", "Valor")
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+grafico1 <- ggplot(data = consulta_vivXupm, aes(x = num_vivXupm)) + geom_histogram(bins = 30) + xlab("Número de viviendas") + ylab("Frecuencia") + theme_minimal()
+```
+
+La distribución y deciles del número de viviendas por UPM se presentan a continuación:
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+grid.arrange(grafico1, tableGrob(consulta1, rows = NULL), ncol = 2)
+```
+
+Si bien existen UPMs con muy pocas viviendas y algunas UPMs que llegan hasta 581 viviendas, el percentil 10 es 68 vivienda y el percentil 90 es de 166 viviendas. El promedio de viviendas es de `r round(mean(consulta_vivXupm$num_vivXupm))` y la mediana es de 114. Las anteriores cifras  nos muestran que el tamaño de las UPMs en términso general es homógeneo alrededor de 114 viviendas.
+
+
+Otro criterio para evaluar la idoneidad de las UPM's es cuantificar que capacidad explicativa tiene las UPM's para predecir fenómenos como la pobreza, el ingreso monetario entre otros indicadores. Para cuantificar lo anterior se utiliza el coeficiente de correlación intraclásica, valores cercanos a cero de este indicador significa una gran diferenciación entre las UPM's y una homogeneidad al interior de ellos:
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+icc_nbi <- ICC(df_censo$NBI[!is.na(df_censo$NBI)], df_censo$UPM2[!is.na(df_censo$NBI)])
+```
+
+El coeficiente de correlación intraclásica del NBI es de `r round(icc_nbi$ICC, 2)`, lo cual significa una explicación considerable del fenómeno de pobreza por parte de las UPMs.
+
+
+El efecto diseño generado por el NBI es de 20,72 como se ilustra a continuación:
+$$deff = 1 + (\bar{n}-1)\rho = 1 + (117 - 1) \times 0.17 = 20,72$$
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+icc_ocupados <- ICC(df_censo$Ocupados[!is.na(df_censo$Ocupados)], df_censo$UPM2[!is.na(df_censo$Ocupados)])
+```
+
+En contraste el coeficiente de correlación intraclásica de la desocupación es cercano a cero (`r round(icc_ocupados$ICC, 2)`),  lo cual indica una gran heterogeniedad al interior de las UPM's en esta variable y una gran homogeneidad de las proporciones de desocupación en las UPMs.
+
