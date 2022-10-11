@@ -1,0 +1,951 @@
+---
+title: "Proceso de Estratificacion"
+author: "José Fernando Zea - Andrés Gutiérrez"
+date: '2022-08-24'
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, warning=FALSE, message=FALSE, echo = FALSE, eval = TRUE}
+rm(list = ls())
+# library(plyr)
+library(tidyverse)
+library(dtplyr)
+library(haven)
+library(arrow)
+library(labelled)
+library(flextable)
+library(magrittr)
+library(stratification)
+library(SamplingStrata)
+library(data.table)
+```
+
+
+En este estudio se agrupan las unidades primarias de muestreo en estratos que serán tratados de forma independiente (como si se tuvieran marcos de muestreo separados para cada subpoblación), de acuerdo a una variable específica), se hace uso de un conjunto de variables auxiliares definidas (listadas anteriormente), con el fin de reducir la varianza de muestreo y asegurar la representatividad de las viviendas en cada uno de los hogares que comparten una característica común
+Estratificación explícita
+Como ya se mencionó, para llevar a cabo la estratificación explicita se dispone de una variable categórica (que puede ser construida a partir de algoritmos de estratificación a partir de variables continuas) o también se peude partir de varias variables categóricas (algunas de ellas o todas construidas a partir de algoritmos de estratificación) y combinarlas para definir los estratos. Para este estudio se usará como variables de estratificación:
+•	Variable de agrupamiento construido a partir de información socioecónomica y de bienestral del censo (3 estratos)
+•	Área (Urbana, rural)
+•	Regiones (6)
+
+
+Se consideran tres agrupamientos de bienestar dadas las características de panel rotativo del estudio, el número de estratos conformados por la combinación del nivel socioeconómica, el área y las 6 regiones (un máximo de 36 estratos).
+
+
+Para el proceso de construcción de los niveles de bienestar se utilizan información socioecónomica y de bienestral del censo, se utilizarán 28 variables enmarcadas en seis dimensiones:
+
+1. Condicion de la vivienda: Casa independiente en condominio, Propia a plazos
+2. Materias de la vivienda: block ladrillo paredes, Ceramica Pisos
+3. Acceso a servicios: Acuaducto_AYA, Tuberia dentro de la vivienda, Desecho por alcantarillado, Cocina con electricidad, Camion recolector de basura
+4. Necesidades basicas satisfechas: Albergue_digno, Conocimiento, Otros_bienes_servicios
+5. Pertenencias: televisión de plasma, computador portatil, internet, cable satelital, tanque de agua, agua caliente, carro, servicio doméstico,
+no hacinamiento, No_hacinamiento aposentos
+6. Educacion: porcentaje de hogares con educación superior, 
+porcentaje de miembros de hogar con título, hogar con personas que saben leer y escribir,  hogar con personas en centro diurno para adultos mayores, personas  parauniversitarias o universitaria
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+setwd("../data/")
+censords <- open_dataset("parquet")
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+censords <- censords %>% select(CONSE, Llave, Llave_Pers, ident_hogar, Hogares, ID_VIVIENDA, 
+V01_TIPO_VIVIENDA, V02_OCUPACION, UGM2, UPM2, ID_PROVINCIA, 
+ID_PC, ID_PCD, ID_HOGAR, viv_tot, Viv_ocup, Pobla, 
+Pobla_sum, P00_NUMERO_LINEA, ID_ZONA, ID_REGION, ID_TERR_INDIGENA,
+  P03_EDAD, V01_TIPO_VIVIENDA, V03_TENENCIA,
+                                V04_MATERIAL_PAREDES, V07_MATERIAL_PISO,
+                                V11_PROVENIENCIA_AGUA,
+                                V12_TUBERIA_AGUA,
+                                V13_SERVICIO_SANITARIO,
+                                V15_COMBUSTIBLE_COCINAR,
+                                V16_ELIMINACION_BASURA,
+                                acceso_albergue_digno,
+                                Acceso_vida_saludable,
+                                acceso_conocimiento,
+                                Acceso_otros_bienes_servicios,
+                                V18C_TV_PLASMA_LCD,
+                                V18I_COMPU_PORTATIL,
+                                V18J_INTERNET,
+                                V18E_TV_CABLE_SATELITE,
+                                V18G_TANQUE_ALMACENA_AGUA,
+                                V18F_SISTEMA_AGUA_CALIENTE,
+                                V18K_CARRO,
+                                SERV_DOMESTICO,
+                                V31_HACINAMIENTO_DORMITORIOS,
+                                V32_HACINAMIENTO_APOSENTOS,
+                                P11_TIPO_SEGURO_SOCIAL,
+                                EDUC_SUPERIOR, EDUC_SECUND, 
+                                P17_OBTUVO_TITULO, 
+                                P15_SABE_LEER_ESCRIBIR,
+                                P13_ASISTE_EDUCACION_CUIDO,
+                                P03_EDAD, P01_PARENTESCO,
+                                P11_TIPO_SEGURO_SOCIAL,
+                                P21_TRABAJO_SEMANA_PASADA,
+                                P23_CONDICION_ACTIVIDAD,
+                                P28_CATEGORIA_OCUPACIONAL,
+                                SECTORES_RAMA) %>% collect()
+censords <- data.table::as.data.table(censords)
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# Construimos identificador de vivienda:
+censords$ident_viv <- substr(censords$ident_hogar, 1, 12)
+```
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# Generamos una tabla con el número de viviendas por UPM:
+df_UPM <- censords %>%
+  group_by(UPM2) %>%
+  summarise(
+    nviv = n()) %>% collect()
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# 3. Indicadores a nivel de UPM
+
+# A. Condición de la viviendas
+df_condicion_vivienda <- censords[,.(V01_TIPO_VIVIENDA = max(V01_TIPO_VIVIENDA),
+          V03_TENENCIA = max(V03_TENENCIA)), by = .(UPM2, ident_viv)]
+
+df_condicion_vivienda <- df_condicion_vivienda %>%  
+                         mutate(casa_indep_condominio =
+                         as.numeric(V01_TIPO_VIVIENDA == 3 & 
+                         !is.na(V01_TIPO_VIVIENDA)),
+                        propia_plazos = as.numeric(V03_TENENCIA == 2 &   
+                                                  !is.na(V03_TENENCIA))) %>%
+                        collect()
+
+var_agreg_condicion_vivienda <- df_condicion_vivienda %>%
+  group_by(UPM2) %>%
+  summarise(
+    casa_indep_condominio = mean(casa_indep_condominio),
+    propia_plazos = mean(propia_plazos)
+  )
+```
+
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+df_material_vivienda <- censords[,.(V04_MATERIAL_PAREDES = max(V04_MATERIAL_PAREDES),
+          V07_MATERIAL_PISO  = max(V07_MATERIAL_PISO)), by = .(UPM2, ident_viv)]
+
+df_material_vivienda <- df_material_vivienda %>%  
+                  mutate(block_ladrillo =
+                  as.numeric(V04_MATERIAL_PAREDES == 1 & 
+                  !is.na(V04_MATERIAL_PAREDES)),
+                  ceramica = as.numeric(V07_MATERIAL_PISO == 1 & 
+                  !is.na(V07_MATERIAL_PISO))) %>%
+                  collect()
+
+var_agreg_material_vivienda <- df_material_vivienda %>%
+  group_by(UPM2) %>%
+  summarise(
+    block_ladrillo = mean(block_ladrillo),
+    ceramica = mean(ceramica)
+  )
+```
+
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+df_acceso_servicio <-  censords[,.(V11_PROVENIENCIA_AGUA  = max(V11_PROVENIENCIA_AGUA),
+          V12_TUBERIA_AGUA  = max(V12_TUBERIA_AGUA),
+          V13_SERVICIO_SANITARIO = max(V13_SERVICIO_SANITARIO),
+          V15_COMBUSTIBLE_COCINAR = max(V15_COMBUSTIBLE_COCINAR),
+          V16_ELIMINACION_BASURA = max(V16_ELIMINACION_BASURA)
+          ), by = .(UPM2, ident_viv)]
+
+df_acceso_servicio <- df_acceso_servicio %>%  
+                  mutate(acueducto = as.numeric(V11_PROVENIENCIA_AGUA %in% 1:4  &
+                                                !is.na(V11_PROVENIENCIA_AGUA)),
+                         tuberia_dentroviv = as.numeric(V12_TUBERIA_AGUA == 1 &
+                                                !is.na(V12_TUBERIA_AGUA)),
+                         desecho_alcantarillado = as.numeric(V13_SERVICIO_SANITARIO == 1 &                                                 !is.na(V13_SERVICIO_SANITARIO)),
+                         cocina_electricidad = as.numeric(V15_COMBUSTIBLE_COCINAR == 1 &
+                                                !is.na(V15_COMBUSTIBLE_COCINAR)),
+                         camion_recolectaBasura = as.numeric(V16_ELIMINACION_BASURA == 1 &
+                                                !is.na(V16_ELIMINACION_BASURA)),
+                         ) %>%
+  collect()
+
+
+var_agreg_acceso_servicio <- df_acceso_servicio %>%
+  group_by(UPM2) %>%
+  summarise(
+    acueducto = mean(acueducto),
+    tuberia_dentroviv = mean(tuberia_dentroviv),
+    desecho_alcantarillado = mean(desecho_alcantarillado),
+    cocina_electricidad = mean(cocina_electricidad),
+    camion_recolectaBasura = mean(camion_recolectaBasura)
+  )
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+df_necesBasicsatisf <-  censords[,.(acceso_albergue_digno  = max(acceso_albergue_digno),
+                                      Acceso_vida_saludable  = max(Acceso_vida_saludable),
+                                      acceso_conocimiento  = max(acceso_conocimiento),
+                      Acceso_otros_bienes_servicios = max(Acceso_otros_bienes_servicios)
+                                      ),
+                                     by = .(UPM2, ident_hogar, ident_viv)]
+
+
+df_necesBasicsatisf <- df_necesBasicsatisf %>%  
+                  mutate(acceso_albergue_digno = as.numeric(acceso_albergue_digno == 1  &
+                                                !is.na(acceso_albergue_digno)),
+                         Acceso_vida_saludable = as.numeric(Acceso_vida_saludable == 1 &
+                                                !is.na(Acceso_vida_saludable)),
+                         
+                         acceso_conocimiento = as.numeric(acceso_conocimiento == 1 &
+                                                !is.na(acceso_conocimiento)),
+                         Acceso_otros_bienes_servicios = 
+                           as.numeric(Acceso_otros_bienes_servicios == 1 &
+          !is.na(Acceso_otros_bienes_servicios)),
+                         ) %>%
+  collect()
+
+
+var_agreg_necesBasicsatisf <- df_necesBasicsatisf %>%
+  group_by(UPM2) %>%
+  summarise(
+    acceso_albergue_digno = mean(acceso_albergue_digno),
+    Acceso_vida_saludable = mean(Acceso_vida_saludable),
+    acceso_conocimiento = mean(acceso_conocimiento),
+    Acceso_otros_bienes_servicios = mean(Acceso_otros_bienes_servicios)
+  )
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+df_pertenencias <-  censords[,.(V18C_TV_PLASMA_LCD  = max(V18C_TV_PLASMA_LCD),
+                                  V18I_COMPU_PORTATIL  = max(V18I_COMPU_PORTATIL),
+                                  V18J_INTERNET  = max(V18J_INTERNET),
+                                V18E_TV_CABLE_SATELITE = max(V18E_TV_CABLE_SATELITE),
+                      V18G_TANQUE_ALMACENA_AGUA  = max(V18G_TANQUE_ALMACENA_AGUA),
+                      V18F_SISTEMA_AGUA_CALIENTE = max(V18F_SISTEMA_AGUA_CALIENTE),
+                      V18K_CARRO = max(V18K_CARRO),
+                      SERV_DOMESTICO = max(SERV_DOMESTICO),
+                      V31_HACINAMIENTO_DORMITORIOS = max(V31_HACINAMIENTO_DORMITORIOS),
+                      V32_HACINAMIENTO_APOSENTOS = max(V32_HACINAMIENTO_APOSENTOS)),
+                                     by = .(UPM2, ident_hogar,ident_viv)]
+
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+df_pertenencias <- df_pertenencias %>%  
+                  mutate(SiTvplasma = as.numeric(V18C_TV_PLASMA_LCD == 1  &
+                                                !is.na(V18C_TV_PLASMA_LCD)),
+                         compPort = as.numeric(V18I_COMPU_PORTATIL == 1 &
+                                                !is.na(V18I_COMPU_PORTATIL)),
+                         Si_internet = as.numeric(V18J_INTERNET == 1 &
+                                                !is.na(V18J_INTERNET)),
+                         CableSatelite = as.numeric(V18E_TV_CABLE_SATELITE == 1 &
+                                                !is.na(V18E_TV_CABLE_SATELITE)),
+                         TanqueAgua = as.numeric(V18G_TANQUE_ALMACENA_AGUA == 1 &
+                                                !is.na(V18G_TANQUE_ALMACENA_AGUA)),
+                         SiAguaCaliente = as.numeric(V18F_SISTEMA_AGUA_CALIENTE == 1 &
+                                                !is.na(V18F_SISTEMA_AGUA_CALIENTE)),
+                         Carro = as.numeric(V18K_CARRO == 1 &
+                                                !is.na(V18K_CARRO)),
+                         ServDomest = as.numeric(SERV_DOMESTICO == 1 &
+                                                !is.na(SERV_DOMESTICO)),
+                         hacinDormit = as.numeric(V31_HACINAMIENTO_DORMITORIOS == 1 &
+                                                !is.na(V31_HACINAMIENTO_DORMITORIOS)),
+                         hacinAposent = as.numeric(V32_HACINAMIENTO_APOSENTOS == 1 &
+                                                !is.na(V32_HACINAMIENTO_APOSENTOS))
+                                                  ) %>%
+  collect()
+
+var_agreg_pertenencias <- df_pertenencias %>%
+  group_by(UPM2) %>%
+  summarise(
+    SiTvplasma = mean(SiTvplasma),
+    compPort = mean(compPort),
+    Si_internet = mean(Si_internet),
+    CableSatelite = mean(CableSatelite),
+    TanqueAgua = mean(TanqueAgua),
+    SiAguaCaliente = mean(SiAguaCaliente),
+    Carro = mean(Carro),
+    ServDomest = mean(ServDomest),
+    hacinDormit = mean(hacinDormit),
+    hacinAposent = mean(hacinAposent)
+  )
+```
+
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# Calcular si en el hogar se obtuvo educación superior, secundaria, etc.
+df_educacionA <-  censords[,.N,
+                           by = .(UPM2, ident_hogar, ident_viv, EDUC_SUPERIOR)]
+df_educacionA <- filter(df_educacionA, EDUC_SUPERIOR == 1)
+df_educacionA <- as.data.frame(df_educacionA)
+df_educacionA$educ_superior <- as.numeric(df_educacionA$EDUC_SUPERIOR >= 1)
+df_educacionA$EDUC_SUPERIOR <- NULL
+df_educacionA$N <- NULL
+
+
+df_educacionB <-  censords[,.N,
+                                     by = .(UPM2, ident_hogar, ident_viv, EDUC_SECUND)]
+df_educacionB <- filter(df_educacionB, EDUC_SECUND == 1)
+df_educacionB <- as.data.frame(df_educacionB)
+df_educacionB$educ_secund <- as.numeric(df_educacionB$EDUC_SECUND >= 1)
+df_educacionB$EDUC_SECUND <- NULL
+df_educacionB$N <- NULL
+
+df_educacionC <-  censords[,.N,
+                                     by = .(UPM2, ident_hogar, ident_viv, P17_OBTUVO_TITULO)]
+df_educacionC <- filter(df_educacionC, P17_OBTUVO_TITULO == 1)
+df_educacionC <- as.data.frame(df_educacionC)
+df_educacionC$obtuvo_titulo <- as.numeric(df_educacionC$P17_OBTUVO_TITULO >= 1)
+df_educacionC$P17_OBTUVO_TITULO <- NULL
+df_educacionC$N <- NULL
+
+df_educacionD <-  censords[,.N,
+                                     by = .(UPM2, ident_hogar, ident_viv, P15_SABE_LEER_ESCRIBIR)]
+df_educacionD <- filter(df_educacionD, P15_SABE_LEER_ESCRIBIR == 1)
+df_educacionD <- as.data.frame(df_educacionD)
+df_educacionD$sabe_leerEscribir <- as.numeric(df_educacionD$P15_SABE_LEER_ESCRIBIR >= 1)
+df_educacionD$P15_SABE_LEER_ESCRIBIR <- NULL
+df_educacionD$N <- NULL
+
+
+df_educacionE <-  censords[,.N,
+                     by = .(UPM2, ident_hogar, ident_viv, P13_ASISTE_EDUCACION_CUIDO)]
+df_educacionE <- filter(df_educacionE, P13_ASISTE_EDUCACION_CUIDO == 4)
+df_educacionE <- as.data.frame(df_educacionE)
+df_educacionE$parauniversitaria_univer <- 
+  as.numeric(df_educacionE$P13_ASISTE_EDUCACION_CUIDO >= 1)
+df_educacionE$P13_ASISTE_EDUCACION_CUIDO <- NULL
+df_educacionE$N <- NULL
+
+
+
+df_educacionF <-  censords[,.N,
+                     by = .(UPM2, ident_hogar, ident_viv, P13_ASISTE_EDUCACION_CUIDO)]
+df_educacionF <- filter(df_educacionF, P13_ASISTE_EDUCACION_CUIDO == 6)
+df_educacionF <- as.data.frame(df_educacionF)
+df_educacionF$centro_diurno_mayores <- 
+  as.numeric(df_educacionF$P13_ASISTE_EDUCACION_CUIDO >= 1)
+df_educacionF$P13_ASISTE_EDUCACION_CUIDO <- NULL
+df_educacionF$N <- NULL
+
+
+df_educacion <- full_join(df_educacionA, df_educacionB)
+df_educacion <- full_join(df_educacion, df_educacionC)
+df_educacion <- full_join(df_educacion, df_educacionD)
+df_educacion <- full_join(df_educacion, df_educacionE)
+df_educacion <- full_join(df_educacion, df_educacionF)
+
+df_educacion$educ_superior <- ifelse(is.na(df_educacion$educ_superior), 0, 
+                                     df_educacion$educ_superior)
+
+df_educacion$educ_secund <- ifelse(is.na(df_educacion$educ_secund), 0, 
+                                     df_educacion$educ_secund)
+
+df_educacion$obtuvo_titulo <- ifelse(is.na(df_educacion$obtuvo_titulo), 0, 
+                                     df_educacion$obtuvo_titulo)
+
+df_educacion$sabe_leerEscribir <- ifelse(is.na(df_educacion$sabe_leerEscribir), 0, 
+                                     df_educacion$sabe_leerEscribir)
+
+df_educacion$parauniversitaria_univer <- ifelse(is.na(df_educacion$parauniversitaria_univer), 0, 
+                                     df_educacion$parauniversitaria_univer)
+
+df_educacion$centro_diurno_mayores <- ifelse(is.na(df_educacion$centro_diurno_mayores), 0, 
+                                     df_educacion$centro_diurno_mayores)
+
+
+
+var_agreg_educacion <- df_educacion %>%
+  group_by(UPM2) %>%
+  summarise(
+    educ_superior = mean(educ_superior),
+    educ_secund = mean(educ_secund),
+    obtuvo_titulo = mean(obtuvo_titulo),
+    sabe_leerEscribir = mean(sabe_leerEscribir),
+    centro_diurno_mayores = mean(centro_diurno_mayores))
+```
+
+
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# c. Integración indicadores
+df_hogar_ocupa <- full_join(df_condicion_vivienda,df_material_vivienda, 
+                            by = c("UPM2", "ident_viv"))
+df_hogar_ocupa <- full_join(df_hogar_ocupa, df_acceso_servicio, by = c("UPM2", "ident_viv"))
+df_hogar_ocupa <- full_join(df_hogar_ocupa, df_necesBasicsatisf, by = c("UPM2", "ident_viv"))
+df_hogar_ocupa <- full_join(df_hogar_ocupa, df_pertenencias,  
+                            by = c("UPM2", "ident_viv", "ident_hogar"))
+df_hogar_ocupa <- full_join(df_hogar_ocupa, df_educacion,  by = c("UPM2", "ident_viv", "ident_hogar"))
+```
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+df_hogar_ocupa$educ_superior <- ifelse(is.na(df_hogar_ocupa$educ_superior), 0,
+                                       df_hogar_ocupa$educ_superior)
+
+
+df_hogar_ocupa$educ_secund <- ifelse(is.na(df_hogar_ocupa$educ_secund), 0,
+                                       df_hogar_ocupa$educ_secund)
+    
+df_hogar_ocupa$obtuvo_titulo   <- ifelse(is.na(df_hogar_ocupa$obtuvo_titulo), 0,
+                                       df_hogar_ocupa$obtuvo_titulo)
+
+df_hogar_ocupa$sabe_leerEscribir    <- ifelse(
+  is.na(df_hogar_ocupa$sabe_leerEscribir ), 0,
+                                       df_hogar_ocupa$sabe_leerEscribir)
+
+df_hogar_ocupa$parauniversitaria_univer     <- ifelse(
+  is.na(df_hogar_ocupa$parauniversitaria_univer  ), 0,
+                                       df_hogar_ocupa$parauniversitaria_univer)
+
+df_hogar_ocupa$centro_diurno_mayores     <- ifelse(
+  is.na(df_hogar_ocupa$centro_diurno_mayores  ), 0,
+                                       df_hogar_ocupa$centro_diurno_mayores)
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+df_varEstratif <- var_agreg_condicion_vivienda %>% 
+  left_join(var_agreg_material_vivienda, by =  "UPM2") %>% 
+  left_join(var_agreg_acceso_servicio, by =  "UPM2") %>% 
+  left_join(var_agreg_necesBasicsatisf, by =  "UPM2") %>% 
+  left_join(var_agreg_pertenencias, by =  "UPM2") %>% 
+    left_join(var_agreg_educacion, by =  "UPM2") %>% 
+  left_join(df_UPM,  by =  "UPM2")
+# summary(df_varEstratif)
+```
+
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# 4. Estratificación multivariada
+# Cargamos las funciones de estratificación:
+
+source("funcion/f_estratificacionMultivariante.R", encoding = "UTF-8")
+```
+
+Las variables a estratificar son:
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+############### Filtrar las  variables de interés a estratificar ###########
+variables_estratificacion <- c("casa_indep_condominio", "propia_plazos", "block_ladrillo", 
+"ceramica", "acueducto", "tuberia_dentroviv", "desecho_alcantarillado", 
+"cocina_electricidad", "camion_recolectaBasura", "acceso_albergue_digno", 
+"Acceso_vida_saludable", "acceso_conocimiento", "Acceso_otros_bienes_servicios", 
+"SiTvplasma", "compPort", "Si_internet", "CableSatelite", "TanqueAgua", 
+"SiAguaCaliente", "Carro", "ServDomest", "hacinDormit", "hacinAposent", 
+"educ_superior", "educ_secund", "obtuvo_titulo", "sabe_leerEscribir", 
+"centro_diurno_mayores")
+# Evaluación
+
+variablesParaEvaluar <- c("casa_indep_condominio", "propia_plazos", "block_ladrillo", 
+"ceramica", "acueducto", "tuberia_dentroviv", "desecho_alcantarillado", 
+"cocina_electricidad", "camion_recolectaBasura", "acceso_albergue_digno", 
+"Acceso_vida_saludable", "acceso_conocimiento", "Acceso_otros_bienes_servicios", 
+"SiTvplasma", "compPort", "Si_internet", "CableSatelite", "TanqueAgua", 
+"SiAguaCaliente", "Carro", "ServDomest", "hacinDormit", "hacinAposent", 
+"educ_superior", "educ_secund", "obtuvo_titulo", "sabe_leerEscribir", 
+"centro_diurno_mayores")
+```
+
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# a. Métodode Jarque (3 estratos)
+df_varEstratif$estrato3H_jarque <-
+  Estratif_kmeans(
+    Matriz_Estratificacion = df_varEstratif[variables_estratificacion],
+    num_estratos = 3,
+    variable_evaluacion_orden_estrato = "acueducto",
+    nombre_estrato_Construido = "estratoH3_Jarque",
+    semilla = 12345,
+    metodo = "Jarque"
+  )
+# Visualizacion
+#for (i in variables_estratificacion) {
+#  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato3H_jarque,
+#          main = i)
+#}
+
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+############### Evaluación de los estratos #############################
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato3H_jarque"),
+                              by = "UPM2")
+
+dff_jarqueE3 <- numeric(length(variablesParaEvaluar))
+df_hogar_ocupa$estrato3H_jarque <- as.factor(df_hogar_ocupa$estrato3H_jarque )
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_jarqueE3[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i],
+                       "estrato3H_jarque")
+}
+names(dff_jarqueE3) <- variablesParaEvaluar
+deff_generalizado_jarque_E3 <- sum(dff_jarqueE3)
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# c. Métodode K-means (3 estratos)
+
+df_varEstratif$estrato3H_Kmeans <-
+  Estratif_kmeans(
+    df_varEstratif[variables_estratificacion],
+    3,
+    "acueducto",
+    "estrato3H_Kmeans",
+    semilla = 12345,
+    metodo = "Kmeans"
+  )
+df_varEstratif$estrato3H_Kmeans <- as.factor(df_varEstratif$estrato3H_Kmeans)
+
+# Visualizacion
+# for (i in variables_estratificacion) {
+#   boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato3H_Kmeans,
+#           main = i)
+# }
+
+############### Evaluación de los estratos #############################
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato3H_Kmeans"),
+                              by = "UPM2")
+
+dff_kmeansE3 <- numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_kmeansE3[i] <-
+    deff_estratificado(df_varEstratif, variablesParaEvaluar[i], "estrato3H_Kmeans")
+}
+names(dff_kmeansE3) <- variablesParaEvaluar
+deff_generalizado_kmeans_E3 <- sum(dff_kmeansE3)
+```
+
+
+
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# Evaluación de los estratos
+
+# Visualizacion
+# for (i in variables_estratificacion) {
+#   boxplot(df_varEstratif[[i]] ~ df_varEstratif$nise,
+#           main = i)
+# }
+
+# ############### Evaluación de los estratos #############################
+
+dff_H3 <- cbind(dff_jarqueE3,
+                dff_kmeansE3)
+
+deff_generalizado_E3 <- c(deff_generalizado_jarque_E3,
+                          deff_generalizado_kmeans_E3)
+
+resumen_H3 <- rbind(dff_H3, deff_generalizado_E3)
+resumen_H3 <- as.data.frame(resumen_H3)
+resumen_H3$Variables <- row.names(resumen_H3)
+row.names(resumen_H3) <- NULL
+resumen_H3$Variables[resumen_H3$Variables == "deff_generalizado_E3"] <-
+  "deff_general."
+resumen_H3$sec <- 1:nrow(resumen_H3)
+```
+
+El efecto diseño asociado a cada una de las variables con los métodos univariados( método de K-means y de Jarque) para tres estratos se presenta a continuación:
+
+```{r, warning=FALSE, message=FALSE, echo = FALSE, eval = TRUE}
+resumen_H3_edita <-  resumen_H3 %>% select(Variables, 
+                                           `deff jarque` = dff_jarqueE3,  
+                                           `deff k-medias` = dff_kmeansE3)
+resumen_H3_edita$`deff jarque` <- round(resumen_H3_edita$`deff jarque`, 2)
+resumen_H3_edita$`deff k-medias` <- round(resumen_H3_edita$`deff k-medias`, 2)
+
+resumen_H3_edita <- cbind(resumen_H3_edita[1:14,], resumen_H3_edita[15:28,])
+names(resumen_H3_edita) <- c("Variables", "Deff jarque",
+                             "Deff k-medias", "Variables (2)", 
+                             "Deff jarque (2)",  "Deff k-medias (2)")
+flextable::flextable(resumen_H3_edita) %>% set_caption("Efecto diseño para las variables con métodos de estratificación multivariados (3 estratos)")
+```
+
+También calculamos el efecto diseño generalizado para los dos métodos univariados utilizados:
+
+```{r, warning=FALSE, message=FALSE, echo = FALSE, eval = TRUE}
+((resumen_H3 %>% mutate(dff_jarqueE3 = round(dff_jarqueE3, 2), 
+                         dff_kmeansE3 = round(dff_kmeansE3, 2)) %>%
+    select(Variables, `Deff jarque` = dff_jarqueE3, 
+           `Deff k-medias` = dff_kmeansE3))[29, ])%>% 
+  flextable() %>% set_caption("Efecto diseño generalizado para las variables con métodos de estratificación multivariados (3 estratos)")
+```
+
+
+```{r, warning=FALSE, message=FALSE, echo = FALSE, eval = TRUE}
+setwd("../output/2. Estratificacion")
+# Guardamos la estratificcación multivariada:
+saveRDS(resumen_H3_edita, "resumen_estratific_multiv_H3.rds")
+saveRDS(((resumen_H3 %>% mutate(dff_jarqueE3 = round(dff_jarqueE3, 2), 
+                         dff_kmeansE3 = round(dff_kmeansE3, 2)) %>%
+    select(Variables, `Deff jarque` = dff_jarqueE3, 
+           `Deff k-medias` = dff_kmeansE3))[29, ]), "resumen_multivariados_univ_Generalizado_H3.rds")
+```
+
+# Métodos univariados
+
+Se llevan a cabo procesos de estratificación univariados (métodos de Dalenius, Lavalleé - Hidiriglou (con algoritmo de Sehthi y de Kozak):
+
+```{r, warning=FALSE, message=FALSE, echo = FALSE, eval = TRUE}
+# 5. Estratificación univariada
+# Leemos la función para calcular el deff:
+source("funcion/f_estratificacionUnivariante.R", encoding = "UTF-8")
+```
+
+
+```{r, warning=FALSE, message=FALSE, echo = FALSE, eval = TRUE}
+# Realizamos el proceso de componentes principales:
+
+####################### ACP ########################
+datos_ACP <- df_varEstratif[variables_estratificacion]
+acp <- FactoMineR::PCA(datos_ACP, graph = F)
+# acp$eig
+
+# Primera componente principal
+df_varEstratif$Factor1 <- acp$ind$coord[, 1]
+Factor_Posit <- scale(df_varEstratif$Factor1) + 10
+Factor_Posit <- as.numeric(Factor_Posit)
+# summary(Factor_Posit)
+# hist(Factor_Posit)
+flextable::flextable(acp$eig %>% head() %>% as.data.frame()) %>% set_caption("Valores propios de los primeros factores")
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# a. Dalenius - Hodges (3 estratos)
+
+H <- 3
+# Daleniuous and Hodge
+estratif_danelniusH3 <-
+  strata.cumrootf(
+    x = Factor_Posit ,
+    Ls = H,
+    CV = 0.03,
+    alloc = c(0.5, 0, 0.5)
+  )
+
+df_varEstratif$estrato_Dalenius3 <- estratif_danelniusH3$stratumID
+
+
+# for (i in variables_estratificacion) {
+#   boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_Dalenius3,
+#           main = i)
+# }
+
+############### Evaluación de los estratos #############################
+
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_Dalenius3"),
+                              by = "UPM2")
+
+dff_Dalenius3 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_Dalenius3[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_Dalenius3")
+}
+names(dff_Dalenius3) <- variablesParaEvaluar
+deff_generalizado_Dalenius_E3 <- sum(dff_Dalenius3)
+```
+
+
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# c. Gunning and Horgan - Geometric Method (3 estratos)
+
+H <- 3
+# hist(Factor_Posit)
+# Geo
+estratif_geoH3 <- strata.geo(
+  x = Factor_Posit ,
+  Ls = H,
+  CV = 0.03,
+  alloc = c(0.5, 0, 0.5)
+)
+
+df_varEstratif$estrato_geo3 <- estratif_geoH3$stratumID
+
+
+# for (i in variables_estratificacion) {
+#   boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_geo3,
+#           main = i)
+# }
+
+
+############### Evaluación de los estratos #############################
+
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_geo3"),
+                              by = "UPM2")
+
+dff_geo3 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_geo3[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_geo3")
+}
+names(dff_geo3) <- variablesParaEvaluar
+deff_generalizado_geo_E3 <- sum(dff_geo3)
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# e. LH Sehthi (3 estratos)
+H <- 3
+# hist(Factor_Posit)
+# LH_Sethi
+estratif_LH_SethiH3 <-
+  strata.LH(
+    x = Factor_Posit ,
+    Ls = H,
+    CV = 0.03,
+    alloc = c(0.5, 0, 0.5),
+    algo = "Sethi"
+  )
+
+df_varEstratif$estrato_LH_Sethi3 <- estratif_LH_SethiH3$stratumID
+
+
+# for (i in variables_estratificacion) {
+#   boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_LH_Sethi3,
+#           main = i)
+# }
+
+
+############### Evaluación de los estratos #############################
+
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_LH_Sethi3"),
+                              by = "UPM2")
+
+dff_LH_Sethi3 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_LH_Sethi3[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_LH_Sethi3")
+}
+names(dff_LH_Sethi3) <- variablesParaEvaluar
+# dff_LH_Sethi3
+deff_generalizado_LH_Sethi_E3 <- sum(dff_LH_Sethi3)
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# g. LH Kozak (3 estratos)
+H <- 3
+# hist(Factor_Posit)
+# LH_Kozak
+estratif_LH_KozakH3 <-
+  strata.LH(
+    x = Factor_Posit ,
+    Ls = H,
+    CV = 0.03,
+    alloc = c(0.5, 0, 0.5),
+    algo = "Kozak"
+  )
+
+df_varEstratif$estrato_LH_Kozak3 <- estratif_LH_KozakH3$stratumID
+
+
+# for (i in variables_estratificacion) {
+#   boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_LH_Kozak3,
+#           main = i)
+# }
+
+
+############### Evaluación de los estratos #############################
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_LH_Kozak3"),
+                              by = "UPM2")
+
+dff_LH_Kozak3 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_LH_Kozak3[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_LH_Kozak3")
+}
+names(dff_LH_Kozak3) <- variablesParaEvaluar
+# dff_LH_Kozak3
+deff_generalizado_LH_Kozak_E3 <- sum(dff_LH_Kozak3)
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# i. Percentiles (3 estratos)
+H <- 3
+# hist(Factor_Posit)
+# LH_Kozak
+
+estratif_estrato_Per3  <- quantile(Factor_Posit,
+                                   probs = seq(0, 1, by = 1 / H),)
+
+df_varEstratif$estrato_Per3 <- cut(
+  Factor_Posit,
+  breaks = estratif_estrato_Per3,
+  include.lowest = T,
+  right = F,
+  label = 1:H
+)
+
+# for (i in variables_estratificacion) {
+#   boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato_Per3,
+#           main = i)
+# }
+
+
+############### Evaluación de los estratos #############################
+
+df_hogar_ocupa %<>% left_join(df_varEstratif %>%
+                                select("UPM2", "estrato_Per3"),
+                              by = "UPM2")
+
+dff_Per3 <- as.numeric(length(variablesParaEvaluar))
+for (i in 1:length(variablesParaEvaluar)) {
+  dff_Per3[i] <-
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato_Per3")
+}
+names(dff_Per3) <- variablesParaEvaluar
+# dff_Per3
+deff_generalizado_Per3 <- sum(dff_Per3)
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# k. Generación de tablas finales estratificacion Univariada
+
+dff_H3 <- cbind(dff_Dalenius3,
+                dff_geo3,
+                dff_LH_Sethi3,
+                dff_LH_Kozak3,
+                dff_Per3)
+
+deff_generalizado_E3 <- c(
+  deff_generalizado_Dalenius_E3,
+  deff_generalizado_geo_E3,
+  deff_generalizado_LH_Sethi_E3,
+  deff_generalizado_LH_Kozak_E3,
+  deff_generalizado_Per3
+)
+
+resumen_univariado_H3 <- rbind(dff_H3, deff_generalizado_E3)
+resumen_univariado_H3 <- as.data.frame(resumen_univariado_H3)
+resumen_univariado_H3$Variables <- row.names(resumen_univariado_H3)
+row.names(resumen_univariado_H3) <- NULL
+resumen_univariado_H3$Variables[resumen_univariado_H3$Variables == "deff_generalizado_E3"] <-
+  "deff_general."
+resumen_univariado_H3$sec <- 1:nrow(resumen_univariado_H3)
+resumen_univariado_H3 <- resumen_univariado_H3 %>% select("sec", "Variables", matches("dff"))
+```
+
+EL desempeño de los métodos univariados se presenta a continuación: 
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+resumen_univariado_H3$dff_Dalenius3 <- round(resumen_univariado_H3$dff_Dalenius3, 2)
+resumen_univariado_H3$dff_geo3 <- round(resumen_univariado_H3$dff_geo3, 2)
+resumen_univariado_H3$dff_LH_Sethi3 <- round(resumen_univariado_H3$dff_LH_Sethi3, 2)
+resumen_univariado_H3$dff_LH_Kozak3 <- round(resumen_univariado_H3$dff_LH_Kozak3, 2)
+resumen_univariado_H3$dff_Per3 <- round(resumen_univariado_H3$dff_Per3, 2)
+
+resumen_univariado_H3_edita <-  resumen_univariado_H3 %>% select(Variables, 
+                                           `deff Dalenius` = dff_Dalenius3,  
+                                           `deff geométrico` = dff_geo3,
+                                           `deff LH (Sethi)` = dff_LH_Sethi3,
+                                           `deff LH (Kozak)` = dff_LH_Kozak3,
+                                           `deff Percentil` = dff_Per3
+                                           )
+flextable::flextable(resumen_univariado_H3_edita[-29,]) %>% set_caption("Efecto diseño para las variables con métodos de estratificación multivariados (3 estratos)")
+```
+
+El efecto diseño generalizado también se presenta a continuación:
+
+```{r, warning=FALSE, message=FALSE, echo = FALSE, eval = TRUE}
+(resumen_univariado_H3_edita[29, ]) %>% 
+  flextable() %>% set_caption("Efecto diseño generalizado para las variables con métodos de estratificación univariados (3 estratos)")
+```
+
+
+Comparando el desempeño de los métodos multivariados y univariados en términos del efecto diseño generalizado:
+
+
+```{r, warning=FALSE, message=FALSE, echo = FALSE, eval = TRUE}
+resumen_multiv_deffGener <- resumen_H3[29, ] %>% 
+  select(Variables, `deff Jarque` = dff_jarqueE3,
+         `deff K means` = dff_kmeansE3)
+cbind(resumen_multiv_deffGener, 
+      resumen_univariado_H3_edita[29, ] %>% select(-Variables)) %>% 
+  flextable() %>% set_caption("Efecto diseño generalizado para las variables con métodos de estratificación (3 estratos)")
+```
+Al comparar los diferentes métodos el mejor método de estratificación es el de K-means. En general por medio de estos métodos se logran separar las variables, por ejemmplo la variable de bloque ladrillo.
+
+```{r, warning=FALSE, message=FALSE, echo = FALSE, eval = TRUE}
+# Visualizacion
+#for (i in variables_estratificacion) {
+i <- "block_ladrillo" 
+ boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato3H_Kmeans,
+          main = i, xlab = "K means (3 estratos)", ylab = "Bloque ladrillo")
+#}
+
+```
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# Guardamos las salidas con los métodos univeriados:
+setwd("../output/2. Estratificacion")
+saveRDS(resumen_univariado_H3_edita, "resumen_Estratificaciones_Univ.rds")
+saveRDS(cbind(resumen_multiv_deffGener, 
+      resumen_univariado_H3_edita[29, ] %>% select(-Variables)), "df_deff_generalizados.rds")
+```
+
+
+```{r}
+df_hogar_ocupa$estrato <- paste0(df_hogar_ocupa)
+```
+
+
+```{r}
+df_censo_vars <- censords %>% select(ident_hogar, ID_ZONA, ID_REGION) %>%
+                 collect()
+df_censo_vars <- df_censo_vars[!duplicated(df_censo_vars$ident_hogar),]
+table(duplicated(df_censo_vars$ident_hogar))
+```
+
+```{r}
+DF_HOGAR <- left_join(df_hogar_ocupa, df_censo_vars, 
+                            by = "ident_hogar")
+# 1 Gran Área Metropolitana, 2 Gran Área Metropolitana, 3 Región Chorotega 
+# 4 Región  Pacífico Central, 5 Región  Brunca, 
+# 6 Región  Huetar Atlántica, 7 Región  Huetar Norte
+
+# La región 1 y 2 se colapsan
+DF_HOGAR$ID_REGION_RECOD <- ifelse(DF_HOGAR$ID_REGION %in% 1:2, 1,
+                                 DF_HOGAR$ID_REGION - 1)
+DF_HOGAR$ESTRATO <- paste0(DF_HOGAR$ID_ZONA,"_",
+       DF_HOGAR$ID_REGION_RECOD,  "_", DF_HOGAR$estrato3H_Kmeans)
+```
+
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
+# Guardamos la tabla con los estratos
+setwd("../output/2. Estratificacion")
+dir()
+saveRDS(DF_HOGAR, "df_hogar_ocupa.Rds")
+```
