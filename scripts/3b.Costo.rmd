@@ -1,0 +1,77 @@
+---
+title: "Modelo de predicción de costos (Costa Rica)"
+author: "José Fernando Zea - Andrés Gutierrez"
+date: "20/4/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Costos
+
+
+
+Incialmente leemos La tabla de costos consta de las tablas de muestreo junto con los costos involucrados en realizar una UPM calculados por el INEC: 
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+library(dplyr)
+library(readxl)
+library(gtsummary)
+datos_urbano <- read_excel("Datos_costos_completo.xlsx", range = "A1:C34")
+datos_rural <- read_excel("Datos_costos_completo.xlsx", range = "G1:I34")
+```
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+names(datos_urbano) <- c("cantVivUpm", "muestraUpmUrb", "costoXUpmUrb")
+names(datos_rural) <- c("cantVivUpm", "muestraUpmRur", "costoXUpmRur")
+
+datos_urbano$costoXUpmUrb <- gsub("\\?", "", datos_urbano$costoXUpmUrb)
+datos_urbano$costoXUpmUrb <- gsub(",", "", datos_urbano$costoXUpmUrb)
+
+datos_rural$costoXUpmRur <- gsub("\\?", "", datos_rural$costoXUpmRur)
+datos_rural$costoXUpmRur <- gsub(",", "", datos_rural$costoXUpmRur)
+```
+
+
+Ajustamos los costos por UPM en términos de la canitdad de viviendas por UPM y la cantidad de UPMs en el área urbano y rural.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+modelo_urbano <- lm(costoXUpmUrb ~ cantVivUpm + muestraUpmUrb, data = datos_urbano)
+modelo_rural <- lm(costoXUpmRur ~ cantVivUpm + muestraUpmRur, data = datos_rural)
+```
+
+Para el área urbana sólo es signitificativa estadísticamente la cantidad de viviendas por UPM, el número de UPMs no resulta estadísticamente significativo.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+modelo_urbano %>% tbl_regression(intercept = T, 
+                                 label = list(cantVivUpm ~ "Cantidad de viviendas por UPM", muestraUpmUrb ~ "Num de UPMs en la muestra"))
+```
+El modelo saturado para el área urbano tiene un coeficiente de determinación de  `r round(100 * summary(modelo_urbano)$r.squared, 1)` %
+
+De manera similar en el área rural:
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+modelo_rural %>% tbl_regression(intercept = T, 
+                                 label = list(cantVivUpm ~ "Cantidad de viviendas por UPM", muestraUpmRur ~ "Num de UPMs en la muestra"))
+```
+
+El $R^2$ del modelo de costos saturado para el área rural es de `r round(100 *summary(modelo_rural)$r.squared, 1)` %
+
+
+Llevamos a cabo un procedimiento stepwise para obtener para verificar si es viable un modelo con únicamente le número de viviendas por UPM.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, eval = FALSE}
+step_urbano <- step(modelo_urbano)
+step_rural <- step(modelo_rural)
+```
+
+Guardar modelo:
+
+```{r}
+save(modelo_urbano, modelo_rural, file = "modelo_Costos_V2.Rdata")
+```
+
+
