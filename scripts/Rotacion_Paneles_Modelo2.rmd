@@ -1,0 +1,509 @@
+---
+title: "Desarrollo panel rotacional"
+author: "José Fernando Zea - Andrés Gutiérrez"
+date: '2022-06-01'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 0. Introducción
+
+Se desarrolan los esquemas rotaciones en cada uno de los estratos de Costa Rica para 10 años en dos pasos:
+
+*1. Preparación del marco poblacional* 2. Desarrollo de esquema rotacional en cada estrato
+
+Primero se cargan los paquetes necesarios para el desarrollo de este ejercicio y dos script con dos funciones a la medida que desarrollan los esquemas de rotación de manera muy flexible:
+
+```{r, warning = FALSE, message = FALSE}
+library(haven)
+library(labelled)
+# library(plyr) # Necesaria tener instalada pero no cargar
+# library(tibble) # Necesaria tener instalada pero no cargar
+library(dplyr)
+library(flextable)
+```
+
+Cargamos la función para la generaciones de los paneles rotativos (para este caso 5-0-0) y una segunda función que asigna las UPMs a los paneles rotativos de manera aleatoria y selecciona la muestra de UPMs en cada estrato en cada periodo y asigna aleatoriamente a cada uno de los paneles:
+
+```{r, warning = FALSE, message = FALSE}
+source("funcion/f_paneles.r")
+source("funcion/f_escenariosPaneles.r")
+```
+
+# 1. Preparación del marco poblacional
+
+Para realizar el esquema rotativo se realizarán los siguientes 5 pasos:
+
+-   A. Lectura del marco poblacional
+-   B. Generación del esquema rotativo
+-   C. Uniones de estratos pequeños
+-   D. Asignación de tamaño de muestra de las UPM (tansversalmente) y asignación de la muestra por estrato (UPM) 4.
+-   E. Construcción de UPMs virtuales
+
+## A. Lectura de marco poblacional
+
+Realizamos la lectura del marco poblacional y llevamos a cabo la exclusión de unas pocas UPMs que tienen menos de 24 vivienda lo cual no permitiría realizar la selección de las 12 viviendas que se requieren por UPM sin poner en riesgo el agotamiento de estas durante los 10 años:
+
+```{r, warning = FALSE, message = FALSE}
+marco <- read_spss("MMV_2011 usuarios_Cepal.sav")
+
+###################### Exclusiones ##########################
+marco <- marco %>% group_by(Num_UPM11) %>% mutate(num_viv_ocup_UpmCompleta = sum(Viv_ocupadas))
+```
+
+```{r}
+filtroMinViviendasEnUPM <-  30
+table(marco$num_viv_ocup_UpmCompleta >= filtroMinViviendasEnUPM, useNA = "a")
+
+```
+
+
+```{r}
+marco <- filter(marco, num_viv_ocup_UpmCompleta >= filtroMinViviendasEnUPM) # Parámetros que se puede discutir
+
+```
+
+
+
+## B. Generación del esquema rotativo
+
+Generamos el esquema rotativo 5-0-0 con la primera función leída:
+
+```{r, warning = FALSE, message = FALSE}
+# Número de trimestres, cada año tiene 4 trimestres
+num_trimestres <- 52 # 13 * 4
+paneles <- cbind(panelesRotativos(5, 0, 0, num_trimestres), 
+                 panelesRotativos(5, 0, 0, num_trimestres, letra_inicial = "F"),
+                 panelesRotativos(5, 0, 0, num_trimestres, letra_inicial = "K"))
+
+num_letras <- paneles %>% as.matrix() %>% as.vector() %>% unique() %>% length()
+num_paneles_trimestre <- ncol(paneles)
+paneles %>% flextable()
+```
+
+El número de paneles diferentes es de 168 paneles:
+
+```{r}
+paneles %>% as.matrix() %>% as.vector() %>% unique() %>% length()
+```
+
+Es importante recalcar que en cada estrato debe haber un mínimo de 168 UPMs (virtuales).
+
+## C. Uniones de estratos pequeños
+
+Los estratos que cuenten con muy pocas UPMs (en este caso el estrato 123: Central Resto Alto) se colapsa, se requieren a lo menos 168 UPM (que corresponde al número de paneles durante 13 años en este ejercicio) para poder garantizar el esquema rotativo, esto conllevará a crear UPMs virtuales dividiendo las UPMs originales:
+
+```{r, warning = FALSE, message = FALSE}
+consulta_temp <- marco %>% group_by(estrato_rsns) %>% summarise(cuenta = n()) %>%
+            arrange(cuenta)
+consulta_temp$Estrato <- consulta_temp$estrato_rsns %>% labelled::to_factor()
+flextable(consulta_temp)
+rm(consulta_temp)
+```
+
+Se une el estrato Central Resto Alto al estrato Central Resto Medio:
+
+```{r, warning = FALSE, message = FALSE}
+########################## Recodificaciones ###############################
+# Central Resto Alto unirlo con Central Resto Medio
+# (código 122 y 123)
+
+marco$estrato_Recod <- ifelse(marco$estrato_rsns %in% c(122, 123), "122-123",
+                              marco$estrato_rsns)
+
+estrato_codigo <- c("122-123", "321", "322", "211", "421", "212", "411", "522", "312", 
+                    "521", "121", "611", "511", "114", "311", "422", "512", "221", 
+                    "412", "222",  "612", "113", "124", "111", "112")
+
+# Gran área metropolitana
+
+estrato_etiqueta <- c("Central Resto Alto - Medio", "Pac. Central Sur Urbano", 
+                      "Pac. Central Sur Rural", 
+                      "Chorotega Norte Urbano", "Brunca Sur Urbano", 
+                      "Chorotega Norte Rural", 
+                      "Brunca Norte Urbano", "H. Atlántica Sur Rural", 
+                      "Pac. Central Norte Rural", 
+                      "H. Atlántica Sur Urbano", "Central Resto Bajo", 
+                      "H. Norte Urbano", 
+                      "H. Atlántica Norte Urbano", "Central GAM Rural", 
+                      "Pac. Central Norte Urbano", 
+                      "Brunca Sur Rural", "H. Atlántica Norte Rural", 
+                      "Chorotega Sur Urbano", 
+                      "Brunca Norte Rural", 
+                      "Chorotega Sur Rural", 
+                      "H. Norte Rural", "Central GAM Alto",
+                      "Central Resto Rural", 
+                      "Central GAM Bajo", 
+                      "Central GAM Medio")
+
+
+marco$estrato_Recod_etiq <- plyr::mapvalues(marco$estrato_Recod, 
+                                            from = estrato_codigo,
+                                            to = estrato_etiqueta)
+
+```
+
+Se resume el tamaño de UPMs en cada uno de los estratos:
+
+```{r, warning = FALSE, message = FALSE}
+consulta_numUpmEstrato <- marco %>% group_by(estrato_Recod) %>% summarise(cuenta = n()) %>%
+  arrange(cuenta)
+
+consulta_numUpmEstrato$estrato_Recod_etiq <- plyr::mapvalues(consulta_numUpmEstrato$estrato_Recod, 
+                                                             from = estrato_codigo, to = estrato_etiqueta)
+flextable(consulta_numUpmEstrato)
+```
+
+Se completa información a las regiones de la región, el área y el estrato:
+
+```{r}
+consulta_numUpmEstrato$nse <- ifelse(grepl("Urbano", consulta_numUpmEstrato$estrato_Recod_etiq),
+                                           "Urbano",
+                              ifelse(grepl("Rural", consulta_numUpmEstrato$estrato_Recod_etiq),
+                                     "Rural",
+                          ifelse(grepl("GAM", consulta_numUpmEstrato$estrato_Recod_etiq),
+                                 "Urbano", NA)))
+consulta_numUpmEstrato$nse[consulta_numUpmEstrato$estrato_Recod_etiq == "Central Resto Alto - Medio"] <- "Urbano"
+
+consulta_numUpmEstrato$nse[consulta_numUpmEstrato$estrato_Recod_etiq == "Central Resto Bajo"] <- "Urbano"
+```
+
+La tabla actualizada con el estrato conformada por el nivel socioeconómico, la región y el área urbana deberá utilizarse para este ejercicio.
+
+## D. Asignación de tamaño de muestra de las UPM (tansversalmente) y asignación de la muestra por estrato (UPM)
+
+Se lleva a cabo la asignación del tamaño de muestra transversal y la asignación por estrato de manera proporcional:
+
+La asignación de Kish se lleva a cabo como sigue:
+
+$$
+n_h = n\frac{\sqrt{\frac{1}{H^2} + \left(\frac{N_h}{N}\right)^2}  }{\sum_{i=1}^{H}\sqrt{\frac{1}{H^2} + \left(\frac{N_i}{N}\right)^2}}
+$$
+
+
+
+La asignación proporcional se realiza de manera independiente para cada uno de los áreas (puesto que el tamaño de muestra se realizó por área):
+```{r, warning = FALSE, message = FALSE}
+############################## Tamaño de muestra de UPMs Universo ###################
+# Ver hoja de cálculo 5-Tamaños de muestra_EncuBase_20-04-2022, hoja: TM_Desocupados (12 viviendas)
+tam_mue_urbano_transv <- 917
+  # 1868
+
+tam_mue_rural_transv <- 1003
+
+
+H_urbano <- length(consulta_numUpmEstrato %>% filter(nse == "Urbano") %>% arrange(estrato_Recod) %>% pull(estrato_Recod_etiq))
+H_rural <-  length(consulta_numUpmEstrato %>% filter(nse == "Rural")  %>% arrange(estrato_Recod) %>% pull(estrato_Recod_etiq))
+
+Nh_urbano <- consulta_numUpmEstrato %>% filter(nse == "Urbano") %>% arrange(estrato_Recod ) %>%  pull(cuenta)
+N_urbano <- sum(Nh_urbano)
+names(Nh_urbano)  <- consulta_numUpmEstrato %>% filter(nse == "Urbano") %>% arrange(estrato_Recod) %>%  pull(estrato_Recod_etiq)
+
+Nh_rural <- consulta_numUpmEstrato %>% filter(nse == "Rural") %>% arrange(estrato_Recod ) %>% pull(cuenta)
+N_rural <- sum(Nh_rural)
+names(Nh_rural)  <- consulta_numUpmEstrato %>% filter(nse == "Rural") %>% arrange(estrato_Recod) %>%  pull(estrato_Recod_etiq)
+
+############### Asignación de Kish ################
+nh_urbano <- round(tam_mue_urbano_transv * (sqrt( ((1/H_urbano)^2) + (Nh_urbano / N_urbano)^2) / 
+                           sum(sqrt( ((1/H_urbano)^2) + (Nh_urbano / N_urbano)^2))))
+
+names(nh_urbano) <-   consulta_numUpmEstrato %>% filter(nse == "Urbano") %>% 
+  arrange(estrato_Recod) %>% pull(estrato_Recod_etiq)
+
+
+nh_rural <- round(tam_mue_rural_transv * (sqrt( ((1/H_rural)^2) + (Nh_rural / N_rural)^2) / 
+                           sum(sqrt( ((1/H_rural)^2) + (Nh_rural / N_rural)^2))))
+names(nh_rural) <-   consulta_numUpmEstrato %>% filter(nse == "Rural") %>% 
+  arrange(estrato_Recod) %>% pull(estrato_Recod_etiq)
+
+```
+
+
+```{r}
+nh_urbano %>% as.data.frame() %>% tibble::rownames_to_column() %>%
+  `names<-`(c("Estrato", "Tam Muestra")) %>%
+  flextable()
+```
+
+```{r}
+nh_rural %>% as.data.frame() %>% tibble::rownames_to_column() %>%
+  `names<-`(c("Estrato", "Tam Muestra")) %>%
+  flextable()
+```
+
+Presentamos un resumen del tamaño poblacional y de muestra por estrato:
+
+```{r, warning = FALSE, message = FALSE}
+############################## Cálculos de tamaño por estrato ############################## 
+# ################## Consultar el tamaño de muestra y de población de cada estrato
+
+# # Integrar tamaño de población y de muestra de los estratos de la UPM
+df_tamPobMueEstratos_urbano <- inner_join(as.data.frame(Nh_urbano) %>% tibble::rownames_to_column(),
+                                   as.data.frame(nh_urbano) %>% tibble::rownames_to_column())
+names(df_tamPobMueEstratos_urbano)[names(df_tamPobMueEstratos_urbano) == "rowname"] <- "estrato_Recod_etiq"
+
+df_tamPobMueEstratos_urbano <- df_tamPobMueEstratos_urbano %>% left_join(consulta_numUpmEstrato %>% select(estrato_Recod, estrato_Recod_etiq)) %>% arrange(estrato_Recod) %>%
+  select(estrato_Recod,	estrato_Recod_etiq,	Nh_urbano,	nh_urbano)
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+df_tamPobMueEstratos_rural <- inner_join(as.data.frame(Nh_rural) %>% tibble::rownames_to_column(),
+                                   as.data.frame(nh_rural) %>%
+                                     tibble::rownames_to_column())
+names(df_tamPobMueEstratos_rural)[names(df_tamPobMueEstratos_rural) == "rowname"] <- "estrato_Recod_etiq"
+
+
+df_tamPobMueEstratos_rural <- df_tamPobMueEstratos_rural %>%
+  left_join(consulta_numUpmEstrato %>% select(estrato_Recod, estrato_Recod_etiq)) %>%  
+  arrange(estrato_Recod) %>%
+  select(estrato_Recod,	estrato_Recod_etiq,	Nh_rural,	nh_rural)
+
+```
+
+
+
+
+## E. Construcción de UPMs virtuales
+
+Llevamos a cabo la construcción de las UPMs virtuales de manera que superen los 132 paneles necesarios durante los 52 trimestres (13 años)
+
+```{r, warning = FALSE, message = FALSE}
+num_particiones_upm <- 2 # Parámetros
+datos_UPMS <- data.frame(estrato_Recod = marco$estrato_Recod,  
+                         estrato_Recod_etiq = marco$estrato_Recod_etiq,
+                         Num_UPM11 = marco$Num_UPM11, 
+num_viv_ocup_UpmCompleta = marco$num_viv_ocup_UpmCompleta)
+
+datos_UPMS <- arrange(datos_UPMS, Num_UPM11)
+
+# Pegarle cual es urbana y cual es rural
+datos_UPMS_urbano <- datos_UPMS %>% right_join(df_tamPobMueEstratos_urbano %>% 
+  select(estrato_Recod, estrato_Recod_etiq))
+
+datos_UPMS_rural <- datos_UPMS %>% right_join(df_tamPobMueEstratos_rural %>% 
+  select(estrato_Recod, estrato_Recod_etiq))
+
+
+# Construir UPMs virtuales
+datos_UPMS_urbano <- datos_UPMS_urbano[rep(row.names(datos_UPMS_urbano), each = num_particiones_upm), ]
+datos_UPMS_urbano <- datos_UPMS_urbano %>% group_by(Num_UPM11) %>%  mutate(sectemp = 1:n())
+datos_UPMS_urbano$upm_virtual <- paste0(datos_UPMS_urbano$Num_UPM11,"_", 1:num_particiones_upm)
+
+datos_UPMS_rural <- datos_UPMS_rural[rep(row.names(datos_UPMS_rural), each = num_particiones_upm), ]
+datos_UPMS_rural <- datos_UPMS_rural %>% group_by(Num_UPM11) %>%  mutate(sectemp = 1:n())
+datos_UPMS_rural$upm_virtual <- paste0(datos_UPMS_rural$Num_UPM11,"_", 1:num_particiones_upm)
+```
+
+
+Revisar si en cada uno de los estratos hay el mínimo número de letras del panel (para este caso 168):
+
+
+```{r}
+consulta_verificacion_urbano <- datos_UPMS_urbano %>%  group_by(estrato_Recod_etiq) %>% summarise(cuenta = n_distinct(upm_virtual)) %>% arrange(cuenta)
+```
+
+```{r}
+consulta_verificacion_rural <- datos_UPMS_rural %>%  group_by(estrato_Recod_etiq) %>% summarise(cuenta = n_distinct(upm_virtual)) %>% arrange(cuenta)
+```
+
+
+
+
+
+```{r}
+head(datos_UPMS_urbano) %>% flextable()
+```
+
+
+```{r}
+head(datos_UPMS_rural) %>% flextable()
+```
+
+
+
+# 2. Desarrollo de esquema rotacional en cada estrato
+
+En este proceso se realiza el esquema rotacional en 4 pasos:
+
+-   A. Inicialización de esquema rotacional
+-   B. Construcción del esquema rotativo en cada estrato (aprox 1 minuto)
+-   C. Revisión de coherencia del panel
+-   D. Organización de salidas
+
+## A. Inicialización de esquema rotacional
+
+Se inicializan las listas dodne se almacenan los esquemas rotacionales en cada uno de los estratos:
+
+```{r, warning = FALSE, message = FALSE}
+
+vctr_estratos_recod_urbano <- sort(unique(datos_UPMS_urbano$estrato_Recod))
+lst_estratoPaneles_urbano <- vector(mode = "list", length = length(vctr_estratos_recod_urbano))
+lst_tampobpaneles_urbano <- vector(mode = "list", length = length(vctr_estratos_recod_urbano))
+lst_tammuebpaneles_urbano <- vector(mode = "list", length = length(vctr_estratos_recod_urbano))
+lst_infoconformacionpaneles_urbano <- vector(mode = "list", length = length(vctr_estratos_recod_urbano))
+lst_infomuepaneles_urbano <- vector(mode = "list", length = length(vctr_estratos_recod_urbano))
+lst_ChequeoTamPobUPM_urbano <- vector(mode = "list", length = length(vctr_estratos_recod_urbano))
+lst_ChequeoTamMueUPM_urbano <- vector(mode = "list", length = length(vctr_estratos_recod_urbano))
+
+
+vctr_estratos_recod_rural <- sort(unique(datos_UPMS_rural$estrato_Recod))
+lst_estratoPaneles_rural <- vector(mode = "list", length = length(vctr_estratos_recod_rural))
+lst_tampobpaneles_rural <- vector(mode = "list", length = length(vctr_estratos_recod_rural))
+lst_tammuebpaneles_rural <- vector(mode = "list", length = length(vctr_estratos_recod_rural))
+lst_infoconformacionpaneles_rural <- vector(mode = "list", length = length(vctr_estratos_recod_rural))
+lst_infomuepaneles_rural <- vector(mode = "list", length = length(vctr_estratos_recod_rural))
+lst_ChequeoTamPobUPM_rural <- vector(mode = "list", length = length(vctr_estratos_recod_rural))
+lst_ChequeoTamMueUPM_rural <- vector(mode = "list", length = length(vctr_estratos_recod_rural))
+```
+
+## B. Construcción del esquema rotativo en cada estrato
+
+Se lleva a cabo en cada estrato la organización de las UPMs en los 156 paneles (en 12 años) y la selección aleatoria de las UPMS en cada uno de los estratos respetando el tamaño de muestra asignado en cada estrato tanto para el área urbana como el área rural:
+
+
+
+```{r}
+for(i in 1:length(vctr_estratos_recod_urbano)){
+   
+  temp_urbano <- (f_escenariosPanel(DF = datos_UPMS_urbano %>% filter(estrato_Recod == vctr_estratos_recod_urbano[i]),
+           nombre_estrato = "estrato_Recod",
+           nombre_UPM = "upm_virtual",
+           panel = paneles,
+           NumUPM_estrato =  2 * df_tamPobMueEstratos_urbano$Nh_urbano[df_tamPobMueEstratos_urbano$estrato_Recod ==  
+                                    vctr_estratos_recod_urbano[i]],
+           Nh_urbano[i], 
+            TamMueUPM_estrato = df_tamPobMueEstratos_urbano$nh_urbano[df_tamPobMueEstratos_urbano$estrato_Recod ==   
+                                                                      vctr_estratos_recod_urbano[i]]))
+  
+  #df_tamPobMueEstratos$tamano_estratos_UPM
+  lst_estratoPaneles_urbano[[i]] <- temp_urbano$DF_EstratoPaneles
+  lst_tampobpaneles_urbano[[i]] <- temp_urbano$DF_TamPobPaneles
+  lst_tammuebpaneles_urbano[[i]] <- temp_urbano$DF_TamMuebPaneles
+  lst_infoconformacionpaneles_urbano[[i]] <- temp_urbano$InfoConformacionPaneles
+  lst_infomuepaneles_urbano[[i]] <- temp_urbano$InfoMuePaneles
+  lst_ChequeoTamPobUPM_urbano[[i]] <- temp_urbano$chequeo_NumUPM_estrato
+  lst_ChequeoTamMueUPM_urbano[[i]]<- temp_urbano$chequeo_TamMueUPM_estrato
+  print(paste("Estrato", i))
+  }
+```
+
+
+
+```{r}
+for(i in 1:length(vctr_estratos_recod_rural)){
+   
+  temp_rural <- (f_escenariosPanel(DF = datos_UPMS_rural %>% filter(estrato_Recod == vctr_estratos_recod_rural[i]),
+           nombre_estrato = "estrato_Recod",
+           nombre_UPM = "upm_virtual",
+           panel = paneles,
+           NumUPM_estrato =  2 * df_tamPobMueEstratos_rural$Nh_rural[df_tamPobMueEstratos_rural$estrato_Recod ==  
+                                    vctr_estratos_recod_rural[i]],
+           Nh_rural[i], 
+            TamMueUPM_estrato = df_tamPobMueEstratos_rural$nh_rural[df_tamPobMueEstratos_rural$estrato_Recod ==   
+                                                                      vctr_estratos_recod_rural[i]]))
+  
+  #df_tamPobMueEstratos$tamano_estratos_UPM
+  lst_estratoPaneles_rural[[i]] <- temp_rural$DF_EstratoPaneles
+  lst_tampobpaneles_rural[[i]] <- temp_rural$DF_TamPobPaneles
+  lst_tammuebpaneles_rural[[i]] <- temp_rural$DF_TamMuebPaneles
+  lst_infoconformacionpaneles_rural[[i]] <- temp_rural$InfoConformacionPaneles
+  lst_infomuepaneles_rural[[i]] <- temp_rural$InfoMuePaneles
+  lst_ChequeoTamPobUPM_rural[[i]] <- temp_rural$chequeo_NumUPM_estrato
+  lst_ChequeoTamMueUPM_rural[[i]]<- temp_rural$chequeo_TamMueUPM_estrato
+  print(paste("Estrato", i))
+  }
+```
+
+# C. Revisión de coherencia del panel
+
+Se lleva a cabo una revisión del esquema rotativo en los trimestres de manera que respete el tamaño de muestra por estrato y también que se utilicen todos los paneles en el período de interés:
+
+
+```{r, warning = FALSE, message = FALSE}
+cat("Revisión de uso de todas las UPMS urbanas:")
+unlist(lst_ChequeoTamPobUPM_urbano) %>% table()
+cat("Revisión de consistencia de tamaño de muestra urbanas:")
+unlist(lst_ChequeoTamMueUPM_urbano) %>% table()
+cat("\n Revisión de uso de todas las UPMS rurales:")
+unlist(lst_ChequeoTamPobUPM_rural) %>% table()
+cat("Revisión de consistencia de tamaño de muestra rurales:")
+unlist(lst_ChequeoTamMueUPM_rural) %>% table()
+```
+
+
+
+
+# Organización de salidas
+
+Cada uno de las salidas de la función que lleva a cabo los escenarios de los paneles urbanos se organizan:
+
+```{r, warning = FALSE, message = FALSE}
+df_estratoPaneles_urbano <- bind_rows(lst_estratoPaneles_urbano)
+df_tampobpaneles_urbano <- bind_rows(lst_tampobpaneles_urbano)
+df_tammuebpaneles_urbano <- bind_rows(lst_tammuebpaneles_urbano)
+df_infoconformacionpaneles_urbano <- bind_rows(lst_infoconformacionpaneles_urbano)
+df_infomuepaneles_urbano <- bind_rows(lst_infomuepaneles_urbano)
+
+df_estratoPaneles_urbano$Estrato_Panel <- paste0(df_estratoPaneles_urbano$Estrato, "_",
+                                    df_estratoPaneles_urbano$Paneles)
+
+df_estratoPaneles_urbano <- df_estratoPaneles_urbano[c("Estrato_Panel", "Estrato", "UPM", "aleatorio", 
+  "Paneles", "NpobUPMEnPanel", 
+  "nUPMEnPanel", "alea_sel", "secuencia", "SeleccionUPM")]
+```
+
+
+
+Cada uno de las salidas de la función que lleva a cabo los escenarios de los paneles rurales se organizan:
+
+
+2294 / 168 (ver primera fila)
+```{r, warning = FALSE, message = FALSE}
+df_estratoPaneles_rural <- bind_rows(lst_estratoPaneles_rural)
+df_tampobpaneles_rural <- bind_rows(lst_tampobpaneles_rural)
+df_tammuebpaneles_rural <- bind_rows(lst_tammuebpaneles_rural)
+df_infoconformacionpaneles_rural <- bind_rows(lst_infoconformacionpaneles_rural)
+df_infomuepaneles_rural <- bind_rows(lst_infomuepaneles_rural)
+
+df_estratoPaneles_rural$Estrato_Panel <- paste0(df_estratoPaneles_rural$Estrato, "_",
+                                    df_estratoPaneles_rural$Paneles)
+
+df_estratoPaneles_rural <- df_estratoPaneles_rural[c("Estrato_Panel", "Estrato", "UPM", "aleatorio", 
+  "Paneles", "NpobUPMEnPanel", 
+  "nUPMEnPanel", "alea_sel", "secuencia", "SeleccionUPM")]
+```
+
+
+
+
+Unificamos el df_estratoPanes
+
+```{r}
+df_estratoPaneles_urbano$zona <- "Urbano"
+df_estratoPaneles_rural$zona <- "Rural"
+
+df_estratoPaneles <- bind_rows(df_estratoPaneles_urbano, df_estratoPaneles_rural)
+```
+
+
+Extraer las letras de cada trimestre:
+
+```{r}
+# i = 1
+lst_nI_upm <- vector(mode = "list", length = nrow(paneles))
+for(i in 1:nrow(paneles)){
+  letras_trimestre <- as.character(paneles[i,])
+  # Filtramos por las letras_trimestres en df_estratoPaneles
+  lst_nI_upm[[i]] <- df_estratoPaneles %>% 
+                     filter(Paneles %in% letras_trimestre & SeleccionUPM == 1) %>%
+                     group_by(Estrato, zona) %>% 
+                     summarise(nI_upm = n_distinct(UPM)) %>% mutate(trimestre = i)
+  
+}
+df_nI_upm <- lst_nI_upm %>% bind_rows()
+```
