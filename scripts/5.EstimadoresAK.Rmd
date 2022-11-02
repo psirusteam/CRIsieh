@@ -1,0 +1,444 @@
+---
+title: "Ejercicio Estimadores compuestos"
+author: "José Fernando Zea"
+date: '2022-10-31'
+output: html_document
+---
+
+```{r setup, include=FALSE}s
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Simularemos un panel de datos conformado por los años 2018 y 2019:
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# Sacar el tmaño de muestra por region area
+# Selección aleatorio de los rotaponales region X (area) Consolidado y concatenar
+# Validar region , edad y sexo
+
+# https://ilostat.ilo.org/es/resources/concepts-and-definitions/description-labour-force-participation-rate/
+# install.packages(pacman)
+
+library(pacman)
+p_load(haven, labelled, srvyr, samplesize4surveys, flextable, dplyr, writexl, tidyr)
+options(survey.adjust.domain.lonely=TRUE)
+options(survey.lonely.psu="adjust")
+```
+
+Se exporta encuesta de hogares del año 2020, seleccionaremos los insumos necesarios para calcular el tamaño de muestra para las encuestas multipropositos en el período intercensal. Se utilizarán como indicadores trazadoras la tasa de desocupación, la pobreza monetaria y el índice de pobreza multidimensional: 
+
+```{r, warning=FALSE, message=FALSE}
+setwd("../data/encuesta")
+df_encuesta <- read_dta("CRI_2019N1.dta")
+df_encuesta %<>% select(id_hogar, id_pers, 
+                        region, areageo, areageo2,
+                        upm = `_upm`, factorex = `_fep`, condact3,
+                        pobreza, edad, niveduc_ee, sexo)
+
+
+ df_encuesta <- df_encuesta %>% mutate(edadR = ifelse(edad < 15, 1,
+                                       ifelse(edad < 30, 2,
+                                       ifelse(edad < 45, 3,
+                                       ifelse(edad < 60, 4,
+                                       ifelse(edad >= 60, 5, NA))))))
+
+```
+
+El identificador de las encuestas está conformado por la concatenación del identificador del hogar y la persona:
+
+```{r, warning=FALSE, message=FALSE}
+# prueba id: id hogar  y persona
+df_encuesta %<>% mutate(id_hogper = paste0(id_hogar, "_", id_pers))
+test_duplicados <- table(duplicated(df_encuesta$id_hogper))
+```
+
+* El número de personas es: `r length(unique(df_encuesta$id_hogper))`
+* El número de hogares es : `r length(unique(df_encuesta$id_hogar))`
+
+Se utilizará como estrato de diseño la combinación de región y área:
+
+```{r, warning=FALSE, message=FALSE}
+df_encuesta %<>% mutate(region_area = paste0(region, "_", areageo))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+df_encuesta %<>% mutate(ocupados = ifelse(condact3 == 1, 1, 
+                                          ifelse(condact3 == -1, NA, 0)),
+                        desocupados = ifelse(condact3 == 2, 1,
+                                             ifelse(condact3 == -1, NA, 0)),
+                        inactivos = ifelse(condact3 == 3, 1,
+                                           ifelse(condact3 == -1, NA, 0)),
+                        activos = ocupados + desocupados,
+                        poblacion_edadTrabajar = ocupados + desocupados + 
+                          inactivos,
+                         poblacion_edadTrabajar = 
+                          ifelse(is.na(poblacion_edadTrabajar), 0, 
+                                 poblacion_edadTrabajar),
+                        poblacion_EdadTrabajar2 = 
+                          as.numeric(df_encuesta$edad >= 15))
+# poblacion_edadTrabajar y poblacion_edadTrabajar generan los mismos valores
+```
+
+
+
+```{r}
+df_encuesta_2019 <- df_encuesta %>%  
+  select(id_hogar, id_pers, upm, areageo,
+         region, sexo, edadR, ocupados, 
+         desocupados, inactivos, activos, poblacion_edadTrabajar,
+         factorex)
+df_encuesta_2019 %<>% mutate(region_area = paste0(region, "_", areageo))
+```
+
+Marcamos la mitad de la población del 2019 como coincidente y la llamamos
+df_encuesta_2018_translape
+
+```{r}
+set.seed(12345)
+aleatorio <- rbinom(n = round(nrow(df_encuesta_2019)),
+                                     size = 1, prob = 0.5)
+df_encuesta_2018_translape <- df_encuesta_2019[as.logical(aleatorio),]
+df_encuesta_2019_translape <- df_encuesta_2019[as.logical(aleatorio),]
+df_encuesta_2019_notranslape <- df_encuesta_2019[!as.logical(aleatorio),]
+
+
+# Modificamos condiciones ocupacionales
+
+
+filtro_ocupados <- df_encuesta_2018_translape$ocupados == 1 & 
+                             !is.na(df_encuesta_2018_translape$ocupados)
+filtro_desocupados <- df_encuesta_2018_translape$desocupados == 1 & 
+                             !is.na(df_encuesta_2018_translape$desocupados)
+filtro_inactivos <- df_encuesta_2018_translape$inactivos == 1 & 
+                             !is.na(df_encuesta_2018_translape$inactivos)
+
+
+# El 95% de los desocupados continuaron desocupados, 
+# el 1% de los ocupados cambio a desocupados
+# el 0.8% de los inactivos cambio a desocupados
+
+set.seed(12345)
+df_encuesta_2018_translape$desocupados[filtro_desocupados] <-
+  1 - rbinom(n = sum(filtro_desocupados), size = 1,
+         prob = 0.05)
+
+# El 1% de los ocupados cambian a desocupados
+set.seed(12345)
+df_encuesta_2018_translape$desocupados[filtro_ocupados] <-
+  rbinom(n = sum(filtro_ocupados), size = 1,
+         prob = 0.01)
+
+# El 0.8% de los inactivos cambian a desocupados
+set.seed(12345)
+df_encuesta_2018_translape$desocupados[filtro_inactivos] <-
+  rbinom(n = sum(filtro_inactivos), size = 1,
+         prob = 0.008)
+
+# El 99% de los desocupados siguen igual
+# el 6% de los desocupados cambio a ocupados
+# el 5% de los inactivos cambio a ocupados
+
+set.seed(12345)
+df_encuesta_2018_translape$ocupados[filtro_ocupados] <-
+  1 - rbinom(n = sum(filtro_ocupados), size = 1,
+         prob = 0.01)
+
+# El 1% de los ocupados cambian a desocupados
+set.seed(12345)
+df_encuesta_2018_translape$ocupados[filtro_desocupados] <-
+  rbinom(n = sum(filtro_desocupados), size = 1,
+         prob = 0.06)
+
+# El 0.8% de los inactivos cambian a desocupados
+set.seed(12345)
+df_encuesta_2018_translape$ocupados[filtro_inactivos] <-
+  rbinom(n = sum(filtro_inactivos), size = 1,
+         prob = 0.05)
+df_encuesta_2018_translape$activos <- df_encuesta_2018_translape$ocupados +
+  df_encuesta_2018_translape$desocupados
+df_encuesta_2018_translape$inactivos <- df_encuesta_2018_translape$poblacion_edadTrabajar - df_encuesta_2018_translape$ocupados - df_encuesta_2018_translape$desocupados
+```
+
+
+Generamos una población aproximadamente la mitad del 2019 con un 9,6 de tasa de .
+
+```{r}
+# Generamos a partir de 2019
+
+# Seleccionamos la mitad de los hogares y le cambiamos los códigos a hogares y UPMS
+n_hogar <- length(unique(df_encuesta_2019$id_hogar))
+n_hogar <- n_hogar / 2
+
+df_hogares <- data.frame(id_hogar = unique(df_encuesta_2019$id_hogar)) %>%
+  as_tibble()
+set.seed(12345)
+df_hogares <- df_hogares[sample(df_hogares$id_hogar, size = n_hogar), ]
+
+df_encuesta_2018_notranslape <- left_join(df_hogares, df_encuesta_2019, by = "id_hogar")
+
+n_2018Notranslape <- nrow(df_encuesta_2018_notranslape)
+
+# table(df_encuesta_2019$edadR)
+set.seed(12345)
+edadR <- sample(1:5, size = n_2018Notranslape, replace = T, 
+                prob = c(0.20, 0.24, 0.21, 0.18, 0.16))
+set.seed(12345)
+poblacion_edadTrabajar <- rbinom(n = n_2018Notranslape, size = 1,
+                                prob = sum((table(edadR) %>% proportions())[-1])    )
+poblacion_activa <- poblacion_edadTrabajar
+# table(df_encuesta_2019$activos[df_encuesta_2019$poblacion_edadTrabajar == 1]) %>% prop.table()
+poblacion_activa[poblacion_edadTrabajar == 1] <- rbinom(n = sum(poblacion_edadTrabajar == 1), size = 1, prob = 0.57)
+poblacion_activa[poblacion_edadTrabajar == 0] <- NA
+# Calculamos la población economicamente activa
+
+# Estimamos los desempleados
+# table(df_encuesta_2019$desocupados[df_encuesta_2019$activos == 1]) %>% prop.table()
+# table(df_encuesta_2018_translape$desocupados[df_encuesta_2018_translape$activos == 1]) %>% prop.table() # Tomamos este
+
+
+poblacion_desocupados <- poblacion_activa
+poblacion_desocupados[poblacion_activa == 1 & !is.na(poblacion_activa)] <- 
+  rbinom(n = sum(poblacion_activa == 1, na.rm = T), size = 1, prob = 0.09)
+poblacion_desocupados[poblacion_edadTrabajar == 0] <- NA
+
+poblacion_ocupados <- poblacion_activa - poblacion_desocupados
+poblacion_inactivos <- poblacion_edadTrabajar - poblacion_activa
+```
+
+Modificamos esa tabla:
+
+```{r}
+# Agregamos 5 ceros al id_hogar y de UPM
+# El factor de expansión le sumamos un valor uniforme entre -5 y 5
+
+df_encuesta_2018_notranslape$factorex <- df_encuesta_2018_notranslape$factorex +
+  round(runif(n = nrow(df_encuesta_2018_notranslape), min = -5, max = 5))
+
+df_encuesta_2018_notranslape$id_hogar <- paste0(df_encuesta_2018_notranslape$id_hogar, "00000")
+
+df_encuesta_2018_notranslape$upm <- paste0(df_encuesta_2018_notranslape$upm, "00000")
+df_encuesta_2018_notranslape$edadR <- edadR
+df_encuesta_2018_notranslape$ocupados <- poblacion_ocupados
+df_encuesta_2018_notranslape$desocupados <- poblacion_desocupados
+df_encuesta_2018_notranslape$inactivos <- poblacion_inactivos
+df_encuesta_2018_notranslape$activos <- poblacion_activa
+df_encuesta_2018_notranslape$poblacion_edadTrabajar <- poblacion_edadTrabajar
+```
+
+
+```{r}
+df_encuesta_2018_translape$id_hogar <- as.character(df_encuesta_2018_translape$id_hogar)
+
+df_encuesta_2018_translape$upm <- as.character(df_encuesta_2018_translape$upm)
+df_encuesta_2018_translape$indica <- "2018_translape"
+df_encuesta_2018_notranslape$indica <- "2018_notranslape"
+
+df_encuesta_2018 <- bind_rows(df_encuesta_2018_translape, df_encuesta_2018_notranslape)
+```
+
+
+```{r}
+df_encuesta_2019_translape$id_hogar <- as.character(df_encuesta_2019_translape$id_hogar)
+df_encuesta_2019_translape$upm <- as.character(df_encuesta_2019_translape$upm)
+
+df_encuesta_2019_notranslape$id_hogar <- as.character(df_encuesta_2019_notranslape$id_hogar)
+df_encuesta_2019_notranslape$upm <- as.character(df_encuesta_2019_notranslape$upm)
+
+df_encuesta_2019_translape$indica <- "2019_translape"
+df_encuesta_2019_notranslape$indica <- "2019_notranslape"
+
+df_encuesta_2019 <- bind_rows(df_encuesta_2019_translape, df_encuesta_2019_notranslape)
+```
+
+
+```{r}
+df_encuesta_2018$ID <- paste0(df_encuesta_2018$id_hogar, df_encuesta_2018$id_pers)
+df_encuesta_2019$ID <- paste0(df_encuesta_2019$id_hogar, df_encuesta_2019$id_pers)
+df_encuesta_2018 <- df_encuesta_2018[!duplicated(df_encuesta_2018$ID),]
+df_encuesta_2019 <- df_encuesta_2019[!duplicated(df_encuesta_2019$ID),]
+df_encuesta_2019$unos <- 1
+#prueba <- df_encuesta_2019[df_encuesta_2019$ID %in% df_encuesta_2018$ID,]
+#prueba2 <- df_encuesta_2018[df_encuesta_2018$ID %in% df_encuesta_2019$ID,]
+```
+
+
+Calculamo la tasa de desocupación para cada encuesta:
+
+```{r}
+diseno_2018 <- df_encuesta_2018 %>% as_survey_design(ids = upm,
+                                        strata = region_area,  
+                                        weights = factorex, nest = T)
+
+
+diseno_2019 <- df_encuesta_2019 %>% as_survey_design(ids = upm,
+                                        strata = region_area,  
+                                        weights = factorex, nest = T)
+
+```
+
+
+```{r}
+df_estima_desocupacion2018 <- diseno_2018 %>% 
+    summarize(total_desocupados = survey_total(desocupados, na.rm = T,
+                                                deff = T),
+             total_activos = survey_total(activos, na.rm = T,
+                                                deff = T), 
+      tasa_desocupacion  = survey_ratio(desocupados, activos, na.rm = T,
+                                                deff = T))
+
+df_estima_desocupacion2019 <- diseno_2019 %>% 
+    summarize(total_desocupados = survey_total(desocupados, na.rm = T,
+                                                deff = T),
+             total_activos = survey_total(activos, na.rm = T,
+                                                deff = T), 
+      tasa_desocupacion  = survey_ratio(desocupados, activos, na.rm = T,
+                                                deff = T),
+      N = survey_total(unos, na.rm = T,
+                                                deff = T))
+df_estima_desocupacion2018$periodo <- 2018
+df_estima_desocupacion2019$periodo <- 2019
+
+ df_estima_desocupacion <-  bind_rows(df_estima_desocupacion2018, df_estima_desocupacion2019)
+```
+
+
+Para la construcción de los indicadores Ak tendremos las estimaciones de las muestras translapadas (matched) y no translapadas las cuales se requerirán para varios de lso ejercicios:
+
+```{r}
+################ Matched (translapada) #############################      
+diseno2018_translape <- df_encuesta_2018_translape %>% as_survey_design(ids = upm,
+                                        strata = region_area,  
+                                        weights = factorex, nest = T)
+
+
+diseno2019_translape <- df_encuesta_2019_translape %>% as_survey_design(ids = upm,
+                                        strata = region_area,  
+                                        weights = factorex, nest = T)
+
+
+df_estima_desocupacion2018_translape <- diseno2018_translape %>% 
+    summarize(total_desocupados = survey_total(desocupados, na.rm = T,
+                                                deff = T),
+             total_activos = survey_total(activos, na.rm = T,
+                                                deff = T), 
+      tasa_desocupacion  = survey_ratio(desocupados, activos, na.rm = T,
+                                                deff = T))
+
+df_estima_desocupacion2019_translape <- diseno2019_translape %>% 
+    summarize(total_desocupados = survey_total(desocupados, na.rm = T,
+                                                deff = T),
+             total_activos = survey_total(activos, na.rm = T,
+                                                deff = T), 
+      tasa_desocupacion  = survey_ratio(desocupados, activos, na.rm = T,
+                                                deff = T))
+```
+
+A continuación calculamos las estimaciones con las muestras no translapadas
+
+```{r}
+################ Unmatched (no translapada) #############################      
+diseno2018_notranslape <- df_encuesta_2018_notranslape %>% 
+                                   as_survey_design(ids = upm,
+                                                    strata = region_area,  
+                                                    weights = factorex, nest = T)
+
+
+diseno2019_notranslape <- df_encuesta_2019_notranslape %>% as_survey_design(ids = upm,
+                                        strata = region_area,  
+                                        weights = factorex, nest = T)
+
+
+df_estima_desocupacion2018_notranslape <- diseno2018_notranslape %>% 
+    summarize(total_desocupados = survey_total(desocupados, na.rm = T,
+                                                deff = T),
+             total_activos = survey_total(activos, na.rm = T,
+                                                deff = T), 
+      tasa_desocupacion  = survey_ratio(desocupados, activos, na.rm = T,
+                                                deff = T))
+
+df_estima_desocupacion2019_notranslape <- diseno2019_notranslape %>% 
+    summarize(total_desocupados = survey_total(desocupados, na.rm = T,
+                                                deff = T),
+             total_activos = survey_total(activos, na.rm = T,
+                                                deff = T), 
+      tasa_desocupacion  = survey_ratio(desocupados, activos, na.rm = T,
+                                                deff = T))
+```
+
+
+# Estimador K
+
+Calculamos el estimador K para el total de desocupados y de activos y finalmente la tasa de desocupación:
+
+```{r}
+K <- 0.2
+
+Delta_desoc <- df_estima_desocupacion2019_translape$total_desocupados -  df_estima_desocupacion2018_translape$total_desocupados
+  
+total_desoc_K_2019 <- (1-K) * df_estima_desocupacion2019$total_desocupados +
+  K * (df_estima_desocupacion2018$total_desocupados + Delta_desoc)
+
+Delta_activos <- df_estima_desocupacion2019_translape$total_activos -  df_estima_desocupacion2018_translape$total_activos
+  
+total_activos_K_2019 <- (1-K) * df_estima_desocupacion2019$total_activos +
+  K * (df_estima_desocupacion2018$total_activos + Delta_activos)
+
+total_desoc_K_2019 / total_activos_K_2019
+```
+
+
+# Estimador AK
+
+```{r}
+A <- 0.4
+total_desoc_AK_2019 <- total_desoc_K_2019 + A * (df_estima_desocupacion2019_notranslape$total_desocupados -                                                df_estima_desocupacion2019_translape$total_desocupados)
+total_activos_AK_2019 <- total_activos_K_2019 + A * (df_estima_desocupacion2019_notranslape$total_activos -                                                df_estima_desocupacion2019_translape$total_activos)
+total_desoc_AK_2019 / total_activos_AK_2019
+```
+
+
+
+A contunuación estimamos un tercer estimador mediante un sistema de calibración.
+
+En primer lugar construimos una variable x para la muestral del 2019, para la parte de la muestra que hay emparejamiento se coloca la dummy asociada a desocupación del año anterior
+
+```{r}
+df_encuesta_2019 <- df_encuesta_2019 %>% left_join(df_encuesta_2018 %>% 
+                                         filter(indica == "2018_translape") %>% 
+                                         select(ID, desocupados2018 = desocupados, 
+                                                activos2018 = activos), by = "ID")
+df_encuesta_2019$x_desoc <- NA
+df_encuesta_2019$x_desoc[df_encuesta_2019$indica == "2019_translape"] <- df_encuesta_2019$desocupados2018[df_encuesta_2019$indica == "2019_translape"] 
+
+df_encuesta_2019$x_desoc[df_encuesta_2019$indica == "2019_notranslape"] <- df_estima_desocupacion2018$tasa_desocupacion
+```
+
+
+```{r}
+library(survey)
+diseno_2019 <- df_encuesta_2019 %>% as_survey_design(ids = upm,
+                                        strata = region_area,  
+                                        weights = factorex, nest = T)
+(calibracion <- calibrate(diseno_2019, ~x_desoc, 
+                          c(df_estima_desocupacion2019$N, df_estima_desocupacion2018$total_desocupados)))
+```
+
+
+```{r}
+svytotal(~desocupados, diseno_2019, na.rm = T)
+```
+
+```{r}
+svyratio(numerator = ~desocupados, denominator = ~activos, diseno_2019, na.rm = T)
+```
+
+
+
