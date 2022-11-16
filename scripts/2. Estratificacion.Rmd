@@ -25,6 +25,7 @@ library(magrittr)
 library(stratification)
 library(SamplingStrata)
 library(data.table)
+library(janitor)
 ```
 
 
@@ -473,7 +474,7 @@ df_varEstratif$estrato3H_jarque <-
     num_estratos = 3,
     variable_evaluacion_orden_estrato = "acueducto",
     nombre_estrato_Construido = "estratoH3_Jarque",
-    semilla = 12345,
+    semilla = 20102022,
     metodo = "Jarque"
   )
 # Visualizacion
@@ -512,7 +513,7 @@ df_varEstratif$estrato3H_Kmeans <-
     3,
     "acueducto",
     "estrato3H_Kmeans",
-    semilla = 12345,
+    semilla = 20102022,
     metodo = "Kmeans"
   )
 df_varEstratif$estrato3H_Kmeans <- as.factor(df_varEstratif$estrato3H_Kmeans)
@@ -531,13 +532,11 @@ df_hogar_ocupa %<>% left_join(df_varEstratif %>%
 dff_kmeansE3 <- numeric(length(variablesParaEvaluar))
 for (i in 1:length(variablesParaEvaluar)) {
   dff_kmeansE3[i] <-
-    deff_estratificado(df_varEstratif, variablesParaEvaluar[i], "estrato3H_Kmeans")
+    deff_estratificado(df_hogar_ocupa, variablesParaEvaluar[i], "estrato3H_Kmeans") # df_varEstratif
 }
 names(dff_kmeansE3) <- variablesParaEvaluar
 deff_generalizado_kmeans_E3 <- sum(dff_kmeansE3)
 ```
-
-
 
 
 
@@ -916,7 +915,7 @@ saveRDS(cbind(resumen_multiv_deffGener,
 
 
 ```{r}
-df_hogar_ocupa$estrato <- paste0(df_hogar_ocupa)
+#df_hogar_ocupa$estrato <- paste0(df_hogar_ocupa)
 ```
 
 
@@ -927,20 +926,92 @@ df_censo_vars <- df_censo_vars[!duplicated(df_censo_vars$ident_hogar),]
 table(duplicated(df_censo_vars$ident_hogar))
 ```
 
+
 ```{r}
 DF_HOGAR <- left_join(df_hogar_ocupa, df_censo_vars, 
                             by = "ident_hogar")
-# 1 Gran Área Metropolitana, 2 Gran Área Metropolitana, 3 Región Chorotega 
+# 1 Gran Área Metropolitana, 2 Resto Región Cental, 3 Región Chorotega 
 # 4 Región  Pacífico Central, 5 Región  Brunca, 
 # 6 Región  Huetar Atlántica, 7 Región  Huetar Norte
 
 # La región 1 y 2 se colapsan
 DF_HOGAR$ID_REGION_RECOD <- ifelse(DF_HOGAR$ID_REGION %in% 1:2, 1,
                                  DF_HOGAR$ID_REGION - 1)
-DF_HOGAR$ESTRATO <- paste0(DF_HOGAR$ID_ZONA,"_",
-       DF_HOGAR$ID_REGION_RECOD,  "_", DF_HOGAR$estrato3H_Kmeans)
+DF_HOGAR$ESTRATO <- paste0(DF_HOGAR$ID_REGION_RECOD,  "_", 
+                           DF_HOGAR$ID_ZONA, "_",
+                           DF_HOGAR$estrato3H_Kmeans)
 ```
 
+
+
+Etiquetamos los estratos:
+
+```{r}
+df_nombresEstratos <- data.frame(ESTRATO = c("6_1_3", "4_1_3", "3_1_1", "6_1_1", 
+"4_1_1", "5_1_3", "2_1_1", "5_2_2|3", "3_1_3", "3_2_2|3", "4_2_2|3", 
+"1_1_1", "2_1_3", "6_2_2|3", "3_2_1", "2_2_2|3", "5_1_1", "6_1_2", 
+"2_2_1", "1_2_1", "4_1_2", "2_1_2", "3_1_2", "5_1_2", "5_2_1", 
+"4_2_1", "6_2_1", "1_2_2|3", "1_1_3", "1_1_2"), 
+NOMBRE_ESTRATO = c("Región  Huetar Norte - Urbano - Alto", 
+"Brunca - Urbano - Alto", "Pacífico central - Urbano - Bajo", 
+"Región  Huetar Norte - Urbano - Bajo", "Brunca - Urbano - Bajo", 
+"Huetar Atlántico - Urbano - Alto", "Chorotega - Urbano - Bajo", 
+"Huetar Atlántico - Rural - Medio/Alto", "Pacífico central - Urbano - Alto", 
+"Pacífico central - Rural - Medio/Alto", "Brunca - Rural - Medio/Alto", 
+"Gran área metropolitana , resto región central - Urbano - Bajo", 
+"Chorotega - Urbano - Alto", "Región  Huetar Norte - Rural - Medio/Alto", 
+"Pacífico central - Rural - Bajo", "Chorotega - Rural - Medio/Alto", 
+"Huetar Atlántico - Urbano - Bajo", "Región  Huetar Norte - Urbano - Medio", 
+"Chorotega - Rural - Bajo", "Gran área metropolitana , resto región central - Rural - Bajo", 
+"Brunca - Urbana - Medio", "Chorotega - Urbano - Medio", "Pacífico central -  Urbano - Medio", "Huetar Atlántico - Urbano - Medio", "Huetar Atlántico - Rural - Bajo", 
+"Brunca - Rural - Bajo", "Región  Huetar Norte - Rural - Bajo", 
+"Gran área metropolitana , resto región central - Rural - Medio/Alto", 
+"Gran área metropolitana , resto región central - Urbano - Alto", 
+"Gran área metropolitana , resto región central - Urbano - Medio"))
+```
+
+
+Evaluamos que regiones colapsar:
+
+```{r}
+consulta_regiones <- tabyl(DF_HOGAR$ESTRATO) %>% arrange(n) %>%
+  mutate(percent = round(100 * percent, 1)) %>% `names<-`(c("ESTRATO", "Frecuencia", "Porcentaje")) %>%
+  left_join(df_nombresEstratos, by = "ESTRATO") %>% 
+  select(ESTRATO, NOMBRE_ESTRATO, Frecuencia, Porcentaje)
+```
+
+
+Colapsamos las regiones con muy pocas viviendas, observe que las regiones rurales del nivel socioeconómico alto de las regiones 1, 2, 3, 4, 5 y 6 (4_2_3, 5_2_3, 3_2_3, 6_2_3,  2_2_3,  1_2_3  y 6_1_3) son poco numerosas por lo cual se colapsaran a los estratos de la respectiva región en el área rural con el nivel socioeconómico medio:
+
+
+
+```{r}
+DF_HOGAR$ESTRATO[DF_HOGAR$ESTRATO %in% c("1_2_3", "1_2_2")] <- "1_2_2|3"
+DF_HOGAR$ESTRATO[DF_HOGAR$ESTRATO %in%  c("2_2_3", "2_2_2")] <- "2_2_2|3"
+DF_HOGAR$ESTRATO[DF_HOGAR$ESTRATO %in%  c("3_2_3", "3_2_2")] <- "3_2_2|3"
+DF_HOGAR$ESTRATO[DF_HOGAR$ESTRATO %in%  c("4_2_3", "4_2_2")] <- "4_2_2|3"
+DF_HOGAR$ESTRATO[DF_HOGAR$ESTRATO %in%  c("5_2_3", "5_2_2")] <- "5_2_2|3"
+DF_HOGAR$ESTRATO[DF_HOGAR$ESTRATO %in%  c("6_2_3", "6_2_2")] <- "6_2_2|3"
+```
+
+
+```{r}
+consulta_regionesB <- tabyl(DF_HOGAR$ESTRATO) %>% arrange(n) %>%
+  mutate(percent = round(100 * percent, 1)) %>% `names<-`(c("ESTRATO", "Frecuencia", "Porcentaje")) %>%
+  left_join(df_nombresEstratos, by = "ESTRATO") %>% 
+  select(ESTRATO, NOMBRE_ESTRATO, Frecuencia, Porcentaje)
+```
+
+En total se conforman 30 estratos.
+
+```{r}
+length(unique(DF_HOGAR$ESTRATO))
+```
+
+
+```{r}
+DF_HOGAR <- right_join(df_nombresEstratos, DF_HOGAR,  by = "ESTRATO")
+```
 
 
 ```{r, warning=FALSE, message=FALSE, eval=TRUE, echo=FALSE}
@@ -949,3 +1020,19 @@ setwd("../output/2. Estratificacion")
 dir()
 saveRDS(DF_HOGAR, "df_hogar_ocupa.Rds")
 ```
+
+
+Guardamos los boxplots para cada una de las variables originales con el estrato construido en K-means:
+
+```{r}
+setwd("Anexos/kmeans 3 estratos")
+# Visualizacion
+ for (i in variables_estratificacion) {
+  png(file = paste0(names(df_varEstratif)[names(df_varEstratif) == i], " .png"), bg = "transparent")
+  boxplot(df_varEstratif[[i]] ~ df_varEstratif$estrato3H_Kmeans, 
+          main = i, xlab = "Estrato (k-medias", 
+          ylab = names(df_varEstratif)[names(df_varEstratif) == i])
+  dev.off()
+ }
+```
+
