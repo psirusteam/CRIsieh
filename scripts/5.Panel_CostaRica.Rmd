@@ -1,0 +1,454 @@
+---
+title: "Ejercicio calibración"
+author: "José Fernando Zea"
+date: '2022-11-29'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+setwd("F:/Documents/CEPAL 2022/Costa Rica/CRIsieh/data/Panel")
+library(haven)
+library(labelled)
+```
+
+
+
+
+```{r}
+base_cepal1 <- read_spss("../data/Panel/Base para cepal I 2022.sav")
+base_cepal2 <- read_spss("../data/Panel/Base para cepal II 2022.sav")
+```
+
+
+
+
+```{r}
+base_cepal1 <- base_cepal1 %>% select(Identificador,  REGION_ID, ZONA_ID, TRIM_ID,  
+Estrato_ECE, sexo =  A5S, edad = A6S, Menor_15, Condicion_actividad, fexp = Factor_7_efm_2022
+)
+base_cepal2 <- base_cepal2 %>% select(Identificador,  REGION_ID, ZONA_ID, TRIM_ID,  
+Estrato_ECE, sexo =  A5S, edad = A6S, Menor_15, Condicion_actividad, fexp = Factor_7_amj_2022
+)
+```
+
+
+```{r}
+base_cepal1$ocupados <- ifelse(base_cepal1$Condicion_actividad == 1, 1, 0)
+base_cepal1$desocupados <- ifelse(base_cepal1$Condicion_actividad == 2, 1, 0)
+base_cepal1$inactivos <- ifelse(base_cepal1$Condicion_actividad == 3, 1, 0)
+base_cepal1$poblacion_edadTrabajar <- ifelse(!is.na(base_cepal1$Condicion_actividad), 1, 0)
+base_cepal1$activos <- ifelse(base_cepal1$ocupados == 1 | 
+                                base_cepal1$desocupados == 1, 1, 0)
+
+base_cepal2$ocupados <- ifelse(base_cepal2$Condicion_actividad == 1, 1, 0)
+base_cepal2$desocupados <- ifelse(base_cepal2$Condicion_actividad == 2, 1, 0)
+base_cepal2$inactivos <- ifelse(base_cepal2$Condicion_actividad == 3, 1, 0)
+base_cepal2$poblacion_edadTrabajar <- ifelse(!is.na(base_cepal2$Condicion_actividad), 1, 0)
+base_cepal2$activos <- ifelse(base_cepal2$ocupados == 1 | 
+                                base_cepal2$desocupados == 1, 1, 0)
+
+base_cepal1$unos <- 1
+base_cepal2$unos <- 1
+
+```
+
+
+
+Calculamos la UPM:
+
+```{r}
+base_cepal1$UPM <- substr(base_cepal1$Identificador, 1, 4)
+base_cepal2$UPM <- substr(base_cepal2$Identificador, 1, 4)
+```
+
+Los casos comunes:
+
+```{r}
+table(base_cepal1$Identificador %in% base_cepal2$Identificador)
+table(base_cepal2$Identificador %in% base_cepal1$Identificador)
+```
+
+```{r}
+table(base_cepal1$Identificador %in% base_cepal2$Identificador) %>% prop.table()
+table(base_cepal2$Identificador %in% base_cepal1$Identificador) %>% prop.table()
+```
+
+Se observa casi un 66% de translape:
+
+```{r}
+base_cepal <- full_join(base_cepal1, base_cepal2, by = "Identificador") 
+```
+
+
+```{r}
+base_cepal$indica <- ifelse(!is.na(base_cepal$fexp.y) & !is.na(base_cepal$fexp.x),
+                            "translape",
+                            ifelse(is.na(base_cepal$fexp.y) &  !is.na(base_cepal$fexp.x), 
+                                   "solo_T1",
+                                   "solo_T2"))
+```
+
+
+
+Colocamos los indicadores de traslape en base_cepal1 y base_cepal2:
+
+
+```{r}
+base_cepal1 <-  base_cepal1 %>% left_join(base_cepal %>% select(Identificador, indica), by = "Identificador")
+
+base_cepal2 <-  base_cepal2 %>% left_join(base_cepal %>% select(Identificador, indica), by = "Identificador")
+
+base_cepal2$dummy_panel <- factor(ifelse(base_cepal2$indica == "solo_T2", 1, 0))
+
+```
+
+
+
+Colocamos la base de los dos trimestres con la población economicamente activa:
+
+```{r}
+base_cepalEA1 <- base_cepal1 %>% filter(poblacion_edadTrabajar == 1)
+base_cepalEA2 <- base_cepal2 %>% filter(poblacion_edadTrabajar == 1)
+
+```
+
+
+# Construcción de las bases de datos para los ejercicios
+
+Se construyen las diferentes tablas necesarias para los ejercicios, las bases translapadas con información del primer y segundo período, las bases no translapadas del período anterior:
+
+
+```{r}
+df_encuesta1_translape <- base_cepal %>% filter(indica == "translape")
+df_encuesta1_translape <- df_encuesta1_translape %>% select(c("Identificador", "REGION_ID.x", "ZONA_ID.x", "TRIM_ID.x", "Estrato_ECE.x", 
+"sexo.x", "edad.x", "Menor_15.x", "Condicion_actividad.x", "fexp.x", 
+"ocupados.x", "desocupados.x", "inactivos.x", "poblacion_edadTrabajar.x", 
+"activos.x", "UPM.x", "indica"))
+
+df_encuesta2_translape <- base_cepal %>% filter(indica == "translape")
+df_encuesta2_translape <- df_encuesta2_translape %>% select(c("Identificador", "REGION_ID.y", "ZONA_ID.y", "TRIM_ID.y", "Estrato_ECE.y", 
+"sexo.y", "edad.y", "Menor_15.y", "Condicion_actividad.y", "fexp.y", 
+"ocupados.y", "desocupados.y", "inactivos.y", "poblacion_edadTrabajar.y", 
+"activos.y", "UPM.y", "indica"))
+
+df_encuestaEA1_notranslape <- base_cepal %>% filter(indica == "solo_T1" & poblacion_edadTrabajar.x == 1)
+df_encuestaEA1_notranslape <- df_encuesta1_translape %>% select(c("Identificador", "REGION_ID.x", "ZONA_ID.x", "TRIM_ID.x", "Estrato_ECE.x", 
+"sexo.x", "edad.x", "Menor_15.x", "Condicion_actividad.x", "fexp.x", 
+"ocupados.x", "desocupados.x", "inactivos.x", "poblacion_edadTrabajar.x", 
+"activos.x", "UPM.x", "indica"))
+```
+
+
+Filtramos la población economicamente activa para las base de los translapes:
+
+```{r}
+df_encuestaEA1_translape <- df_encuesta1_translape %>% 
+  filter(poblacion_edadTrabajar.x == 1)
+df_encuestaEA2_translape <- df_encuesta2_translape %>% 
+  filter(poblacion_edadTrabajar.y == 1)
+
+```
+
+
+
+# Definición de diseños muestrales
+
+Definimos los diseños necesarios para los ejercicios:
+
+```{r}
+disenoEA1 <- base_cepalEA1 %>% as_survey_design(ids = UPM,
+                                        strata = REGION_ID,  
+                                        weights = fexp, nest = T)
+
+
+
+################ Matched (translapada) #############################      
+disenoEA1_translape <- df_encuestaEA1_translape %>% as_survey_design(ids = UPM.x,
+                                        strata = REGION_ID.x,  
+                                        weights = fexp.x, nest = T)
+
+
+disenoEA2_translape <- df_encuestaEA2_translape %>% as_survey_design(ids = UPM.y,
+                                        strata = REGION_ID.y,  
+                                        weights = fexp.y, nest = T)
+
+
+################ UnMatched (no translapada) #############################      
+disenoEA1_notranslape <- df_encuestaEA1_notranslape %>% as_survey_design(ids = UPM.x,
+                                        strata = REGION_ID.x,  
+                                        weights = fexp.x, nest = T)
+
+
+#Calculamos la tasa de desocupación para las dos encuestas por separado con los estimadores tradicionales:
+
+```
+
+
+
+
+# Cálculo de estimaciones de desocupación
+
+
+
+Para la construcción de los indicadores Ak tendremos las estimaciones de las muestras translapadas (matched) y no translapadas (unmatched) las cuales se requerirán para los estimadores compuestos:
+
+```{r}
+df_estima_desocupacionEA1_translape <- disenoEA1_translape %>% 
+    summarize(total_desocupados = survey_total(desocupados.x, na.rm = T,
+                                                deff = T),
+             total_activos = survey_total(activos.x, na.rm = T,
+                                                deff = T), 
+      tasa_desocupacion  = survey_ratio(desocupados.x, activos.x, na.rm = T,
+                                                deff = T))
+
+df_estima_desocupacionEA2_translape <- disenoEA2_translape %>% 
+    summarize(total_desocupados = survey_total(desocupados.y, na.rm = T,
+                                                deff = T),
+             total_activos = survey_total(activos.y, na.rm = T,
+                                                deff = T), 
+      tasa_desocupacion  = survey_ratio(desocupados.y, activos.y, na.rm = T,
+                                                deff = T))
+```
+
+Calculamos las estimaciones con la muestra no translapadas del primer período de análisis:
+
+
+```{r}
+df_estima_desocupacionEA1_notranslape <- disenoEA1_notranslape %>% 
+    summarise(total_desocupados = survey_total(desocupados.x, na.rm = T,
+                                                deff = T),
+             total_activos = survey_total(activos.x, na.rm = T,
+                                                deff = T), 
+      tasa_desocupacion  = survey_ratio(desocupados.x, activos.x, na.rm = T,
+                                                deff = T))
+```
+
+
+```{r}
+df_estimaEA_desocupacion1 <- disenoEA1 %>% 
+    summarize(total_desocupados = survey_total(desocupados, na.rm = T,
+                                                deff = T),
+             total_activos = survey_total(activos, na.rm = T,
+                                                deff = T), 
+      tasa_desocupacion  = survey_ratio(desocupados, activos, na.rm = T,
+                                                deff = T))
+
+
+```
+
+
+
+
+# Estimador x_l
+
+```{r}
+base_cepalEA2 <- base_cepalEA2 %>% left_join(base_cepalEA1 %>% 
+                select(Identificador, xl = desocupados), by = "Identificador")
+base_cepalEA2$xl[is.na(base_cepalEA2$xl)] <- df_estimaEA_desocupacion1$tasa_desocupacion
+```
+
+
+```{r}
+disenoEA2 <- base_cepalEA2 %>% as_survey_design(ids = UPM,
+                                        strata = REGION_ID,  
+                                        weights = fexp, nest = T)
+
+df_estimaEA_desocupacion2 <- disenoEA2 %>% 
+    summarize(total_desocupados = survey_total(desocupados, na.rm = T,
+                                                deff = T),
+             total_activos = survey_total(activos, na.rm = T,
+                                                deff = T), 
+      tasa_desocupacion  = survey_ratio(desocupados, activos, na.rm = T,
+                                                deff = T),
+      N = survey_total(unos, na.rm = T,
+                                                deff = T))
+df_estimaEA_desocupacion1$periodo <- 1
+df_estimaEA_desocupacion2$periodo <- 2
+```
+
+
+```{r}
+# Esta en la base del 2019 las variables auxiliares
+# table(base_cepalEA2$dummy_panel) %>% prop.table()
+#total_2 <- c(sum(base_cepalEA2$unos * base_cepalEA2$fexp))
+total_2 <- 4093655 # Total de población económicamente activa
+
+
+calibracion_xl <- calibrate(disenoEA2, ~ 1 + xl, 
+        c(total_2, df_estimaEA_desocupacion1$total_desocupados))
+```
+
+
+```{r}
+svyratio(numerator = ~desocupados, denominator = ~activos, 
+         disenoEA2, na.rm = T)
+
+```
+
+
+```{r}
+svyratio(numerator = ~desocupados, denominator = ~activos, 
+         calibracion_xl, na.rm = T)
+```
+
+
+# Estimador x_c
+
+
+```{r}
+R <- sum(base_cepalEA2$fexp) / sum(base_cepalEA2$fexp[base_cepalEA2$indica == "translape"])
+base_cepalEA2$xc <- NA
+
+base_cepalEA2$xc[base_cepalEA2$indica == "solo_T2"] <-  
+  base_cepalEA2$desocupados[base_cepalEA2$indica == "solo_T2"] 
+
+base_cepalEA2$xc[base_cepalEA2$indica == "translape"] <-  
+  base_cepalEA2$desocupados[base_cepalEA2$indica == "translape"] - R * ( base_cepalEA2$desocupados[base_cepalEA2$indica == "translape"] - 
+base_cepalEA2$xl[base_cepalEA2$indica == "translape"])
+
+disenoEA2 <- base_cepalEA2 %>% as_survey_design(ids = UPM,
+                                        strata = REGION_ID,  
+                                        weights = fexp, nest = T)
+
+#total_2 <- c(sum(base_cepalEA2$unos * base_cepalEA2$fexp))
+calibracion_xc <- calibrate(disenoEA2, ~ 1 + xc, 
+        c(total_2, df_estimaEA_desocupacion1$total_desocupados))
+
+```
+
+```{r}
+svyratio(numerator = ~desocupados, denominator = ~activos, 
+         calibracion_xc, na.rm = T)
+```
+
+
+Cuadramos el estimador combinado:
+
+```{r}
+alpha <- 2/3
+base_cepalEA2$x_comb <- (1-alpha) * base_cepalEA2$xl + alpha * base_cepalEA2$xc
+
+
+disenoEA2 <- base_cepalEA2 %>% as_survey_design(ids = UPM,
+                                        strata = REGION_ID,  
+                                        weights = fexp, nest = T)
+
+calibracion_x_comb <- calibrate(disenoEA2, ~ 1 + x_comb, 
+        c(total_2, df_estimaEA_desocupacion1$total_desocupados))
+```
+
+
+
+
+```{r}
+svyratio(numerator = ~desocupados, denominator = ~activos, 
+         calibracion_xc, na.rm = T)
+```
+
+
+# Escenario con calibración
+
+
+
+
+# Combinación más demográficas
+
+```{r}
+val_labels(base_cepal2$REGION_ID)
+```
+
+
+```{r}
+val_labels(base_cepal2$edad)
+
+```
+
+```{r}
+val_labels(base_cepal2$sexo)
+```
+
+
+
+Sacamos los totales sobre la población economicamente activa, se omite la primera categoría, por ejemplo en región se omite la región central
+
+```{r}
+table(base_cepalEA2$REGION_ID)
+```
+
+Y se omiten los hombres:
+
+```{r}
+table(base_cepalEA2$sexo)
+```
+
+  Código           Región Total...15
+1      1          Central  2,582,059
+2      2        Chorotega    357,044
+3      3 Pacífico Central    277,249
+4      4           Brunca    330,390
+5      5    Huetar Caribe    411,179
+6      6     Huetar Norte    382,245
+
+
+
+Total Hombres: 2,051,807
+Total Mujeres: 2,041,848
+
+
+
+```{r}
+base_cepalEA2$REGION_ID <- factor(base_cepalEA2$REGION_ID)
+base_cepalEA2$sexo <- factor(base_cepalEA2$sexo)
+
+disenoEA2 <- base_cepalEA2 %>% as_survey_design(ids = UPM,
+                                        strata = REGION_ID,  
+                                        weights = fexp, nest = T)
+
+calibracion_x_combDemograf <- calibrate(disenoEA2, ~ 1 + x_comb + REGION_ID + sexo,
+c(total_2, df_estimaEA_desocupacion1$total_desocupados, 
+  357044, 277249, 330390, 411179, 382245, 2041848)
+)
+
+```
+
+
+```{r}
+svyratio(numerator = ~desocupados, denominator = ~activos, 
+         calibracion_x_combDemograf, na.rm = T)
+```
+
+
+Finalmente incluimos el panel en la calibración:
+
+```{r}
+table(base_cepalEA2$dummy_panel)
+table(base_cepalEA2$indica)
+
+```
+
+```{r}
+
+calibracion_x_combDemografPanel <- calibrate(disenoEA2, ~ 1 + x_comb + REGION_ID + sexo +
+                                          dummy_panel,
+c(`(Intercept)` = total_2,
+  x_comb = df_estimaEA_desocupacion1$total_desocupados, 
+  REGION_ID2 = 357044, REGION_ID3 = 277249, 
+  REGION_ID4 = 330390, 
+  REGION_ID5 = 411179, REGION_ID6 = 382245, 
+  sexo2 = 2041848, dummy_panel1 = total_2 / 3)
+)
+
+svyratio(numerator = ~desocupados, denominator = ~activos, 
+         calibracion_x_combDemografPanel, na.rm = T)
+```
+
+
+
+
+
+# Resumen
